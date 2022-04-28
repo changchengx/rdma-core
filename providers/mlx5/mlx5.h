@@ -91,6 +91,7 @@ enum {
 	MLX5_DBG_CQ_CQE		= 1 << 4,
 	MLX5_DBG_CONTIG		= 1 << 5,
 	MLX5_DBG_DR		= 1 << 6,
+	MLX5_DBG_SPEC		= 1 << 31,
 };
 
 extern uint32_t mlx5_debug_mask;

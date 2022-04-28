@@ -1072,6 +1072,7 @@ static struct ibv_cq_ex *create_cq(struct ibv_context *context,
 			if (mctx->cqe_comp_caps.max_num &&
 			    (mlx5cq_attr->cqe_comp_res_format &
 			     mctx->cqe_comp_caps.supported_format)) {
+				mlx5_dbg(fp, MLX5_DBG_SPEC, "Enable CQE Compression\n");
 				cmd_drv->cqe_comp_en = 1;
 				cmd_drv->cqe_comp_res_format = mlx5cq_attr->cqe_comp_res_format;
 			} else {
@@ -1169,6 +1170,7 @@ struct ibv_cq *mlx5_create_cq(struct ibv_context *context, int cqe,
 
 	env = getenv("MLX5_COMPRESSED_CQE");
 	if (env) {
+		mlx5_dbg(to_mctx(context)->dbg_fp, MLX5_DBG_SPEC, "user env config CQE Compression\n");
 		mlx5cq_attr.comp_mask |= MLX5DV_CQ_INIT_ATTR_MASK_COMPRESSED_CQE;
 		mlx5cq_attr.cqe_comp_res_format = MLX5DV_CQE_RES_FORMAT_HASH;
 	}

@@ -1160,17 +1160,25 @@ struct ibv_cq *mlx5_create_cq(struct ibv_context *context, int cqe,
 			      struct ibv_comp_channel *channel,
 			      int comp_vector)
 {
+	char *env;
 	struct ibv_cq_ex *cq;
 	struct ibv_cq_init_attr_ex cq_attr = {.cqe = cqe, .channel = channel,
 						.comp_vector = comp_vector,
 						.wc_flags = IBV_WC_STANDARD_FLAGS};
+	struct mlx5dv_cq_init_attr mlx5cq_attr = {};
+
+	env = getenv("MLX5_COMPRESSED_CQE");
+	if (env) {
+		mlx5cq_attr.comp_mask |= MLX5DV_CQ_INIT_ATTR_MASK_COMPRESSED_CQE;
+		mlx5cq_attr.cqe_comp_res_format = MLX5DV_CQE_RES_FORMAT_HASH;
+	}
 
 	if (cqe <= 0) {
 		errno = EINVAL;
 		return NULL;
 	}
 
-	cq = create_cq(context, &cq_attr, 0, NULL);
+	cq = create_cq(context, &cq_attr, 0, &mlx5cq_attr);
 	return cq ? ibv_cq_ex_to_cq(cq) : NULL;
 }
 

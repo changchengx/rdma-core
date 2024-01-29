@@ -3447,6 +3447,45 @@ static inline void mlx5_wr_memcpy(struct mlx5dv_qp_ex *mqp_ex,
 	_common_wqe_finalize(mqp);
 }
 
+static inline
+void mlx5_wr_invcache(struct mlx5dv_qp_ex *mqp_ex,
+		uint32_t lkey, uint64_t addr, size_t length,
+		bool need_writeback)
+{
+	struct mlx5_qp *mqp = mqp_from_mlx5dv_qp_ex(mqp_ex);
+	struct ibv_qp_ex *ibqp = &mqp->verbs_qp.qp_ex;
+	struct mlx5_pd *mpd = to_mpd(mqp->ibv_qp->pd);
+	struct mlx5_mmo_wqe *mma_wqe;
+
+	if (unlikely(!length)) {
+		if (!mqp->err)
+			mqp->err = EINVAL;
+		return;
+	}
+
+	_common_wqe_init_op(ibqp, -1, MLX5_OPCODE_MMO);
+
+	if (need_writeback) {
+		mqp->cur_ctrl->imm |= htobe32(1);
+	}
+
+	mqp->cur_ctrl->opmod_idx_opcode =
+		htobe32((be32toh(mqp->cur_ctrl->opmod_idx_opcode) & 0xffffff) |
+			(MLX5_OPC_MOD_MMO_INVCACHE << 24));
+
+	mma_wqe = (struct mlx5_mmo_wqe *)mqp->cur_ctrl;
+	mma_wqe->mmo_meta.mmo_control_31_0 = 0;
+	mma_wqe->mmo_meta.local_key = htobe32(mpd->opaque_mr->lkey);
+	mma_wqe->mmo_meta.local_address = htobe64((uint64_t)(uintptr_t)mpd->opaque_buf);
+
+	mlx5dv_set_data_seg(&mma_wqe->src, length, lkey, addr);
+	mlx5dv_set_data_seg(&mma_wqe->dest, length, lkey, addr);
+
+	mqp->cur_size = sizeof(*mma_wqe) / 16;
+	mqp->nreq++;
+	_common_wqe_finalize(mqp);
+}
+
 enum {
 	MLX5_SUPPORTED_SEND_OPS_FLAGS_RC =
 		IBV_QP_EX_WITH_SEND |
@@ -3614,6 +3653,7 @@ int mlx5_qp_fill_wr_pfns(struct mlx5_qp *mqp,
 			dv_qp->wr_set_mkey_crypto =
 				mlx5_send_wr_set_mkey_crypto;
 			dv_qp->wr_memcpy = mlx5_wr_memcpy;
+			dv_qp->wr_invcache = mlx5_wr_invcache;
 		}
 
 		break;
@@ -3674,6 +3714,7 @@ int mlx5_qp_fill_wr_pfns(struct mlx5_qp *mqp,
 		dv_qp->wr_set_dc_addr = mlx5_send_wr_set_dc_addr;
 		dv_qp->wr_set_dc_addr_stream = mlx5_send_wr_set_dc_addr_stream;
 		dv_qp->wr_memcpy = mlx5_wr_memcpy;
+		dv_qp->wr_invcache = mlx5_wr_invcache;
 		break;
 
 	default:

@@ -223,6 +223,7 @@ struct mlx5_wqe_set_psv_seg {
 
 enum {
 	MLX5_OPC_MOD_MMO_DMA = 0x1,
+	MLX5_OPC_MOD_MMO_INVCACHE = 0x8,
 };
 
 struct mlx5_mmo_metadata_seg {

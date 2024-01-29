@@ -489,6 +489,9 @@ struct mlx5dv_qp_ex {
 			  size_t length);
 	void (*wr_set_mkey_crypto)(struct mlx5dv_qp_ex *mqp,
 				   const struct mlx5dv_crypto_attr *attr);
+	void (*wr_invcache)(struct mlx5dv_qp_ex *mqp,
+			  uint32_t lkey, uint64_t addr, size_t length,
+			  bool need_writeback);
 };
 
 struct mlx5dv_qp_ex *mlx5dv_qp_ex_from_ibv_qp_ex(struct ibv_qp_ex *qp);
@@ -580,6 +583,13 @@ static inline void mlx5dv_wr_memcpy(struct mlx5dv_qp_ex *mqp,
 				    size_t length)
 {
 	mqp->wr_memcpy(mqp, dest_lkey, dest_addr, src_lkey, src_addr, length);
+}
+
+static inline
+void mlx5dv_wr_invcache(struct mlx5dv_qp_ex *mqp, uint32_t lkey,
+		uint64_t addr, size_t length, bool need_writeback)
+{
+	mqp->wr_invcache(mqp, lkey, addr, length, need_writeback);
 }
 
 enum mlx5dv_mkey_err_type {

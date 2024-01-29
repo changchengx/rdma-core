@@ -17,6 +17,8 @@ mlx5dv_wr_raw_wqe - Build a raw work request
 
 mlx5dv_wr_memcpy - Build a DMA memcpy work request
 
+mlx5dv_wr_invcache - Build a MMA work request
+
 # SYNOPSIS
 
 ```c

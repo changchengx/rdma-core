@@ -1043,6 +1043,10 @@ static struct ibv_cq_ex *create_cq(struct ibv_context *context,
 	resp_drv = &resp_ex.drv_payload;
 	cq->cons_index = 0;
 
+	/* wait_index should start at value before 0 */
+	cq->wait_index = (uint32_t)(-1);
+	cq->wait_count = 0;
+
 	if (mlx5_spinlock_init(&cq->lock, !mlx5_single_threaded))
 		goto err;
 
@@ -1499,6 +1503,13 @@ static int _sq_overhead(struct mlx5_qp *qp,
 		   IBV_QP_EX_WITH_RDMA_READ))
 		rdma_size = sizeof(struct mlx5_wqe_ctrl_seg) +
 			    sizeof(struct mlx5_wqe_raddr_seg);
+
+	if (ops & (IBV_QP_EX_WITH_VECTOR_CALC)) {
+		// write or send
+		rdma_size = rdma_size?
+			rdma_size + sizeof(struct mlx5_vector_calc_seg) :
+			sizeof(struct mlx5_wqe_ctrl_seg) + sizeof(struct mlx5_vector_calc_seg);
+	}
 
 	if (ops & (IBV_QP_EX_WITH_ATOMIC_CMP_AND_SWP |
 		   IBV_QP_EX_WITH_ATOMIC_FETCH_AND_ADD))

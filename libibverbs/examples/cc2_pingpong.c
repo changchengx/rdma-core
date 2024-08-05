@@ -2113,6 +2113,8 @@ int main(int argc, char *argv[]) {
 
 		messaged("server: got %d completions\n", ne_count);
 		fflush(stdout);
+		messaged("ctrl+c to quit...\n");
+		while(1);
 	} else {
 		int ne_count = 0;
 

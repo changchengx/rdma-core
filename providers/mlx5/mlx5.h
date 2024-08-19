@@ -654,6 +654,8 @@ struct mlx5_mr {
 enum mlx5_qp_flags {
 	MLX5_QP_FLAGS_USE_UNDERLAY = 0x01,
 	MLX5_QP_FLAGS_DRAIN_SIGERR = 0x02,
+	MLX5_QP_FLAGS_IGNORE_SQ_OVERFLOW = 0x04,
+	MLX5_QP_FLAGS_IGNORE_RQ_OVERFLOW = 0x08,
 };
 
 struct devx_qp {

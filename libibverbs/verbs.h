@@ -941,6 +941,8 @@ enum ibv_qp_create_flags {
 	IBV_QP_CREATE_CROSS_CHANNEL	= 1 << 2,
 	IBV_QP_CREATE_MANAGED_SEND	= 1 << 3,
 	IBV_QP_CREATE_MANAGED_RECV	= 1 << 4,
+	IBV_QP_CREATE_IGNORE_SQ_OVERFLOW   = (1 << 6),         /* Send queue overflow will be ignored */
+	IBV_QP_CREATE_IGNORE_RQ_OVERFLOW   = (1 << 7),         /* Recv queue overflow will be ignored */
 	IBV_QP_CREATE_SCATTER_FCS		= 1 << 8,
 	IBV_QP_CREATE_CVLAN_STRIPPING		= 1 << 9,
 	IBV_QP_CREATE_SOURCE_QPN		= 1 << 10,

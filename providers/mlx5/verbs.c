@@ -2465,6 +2465,16 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 			attr->create_flags &= ~IBV_QP_CREATE_MANAGED_RECV;
 		}
 		qp->need_devx_qp = qp->need_cd_master | qp->need_cd_slave_send | qp->need_cd_slave_recv;
+
+		if (attr->create_flags & IBV_QP_CREATE_IGNORE_SQ_OVERFLOW) {
+			qp->flags |= MLX5_QP_FLAGS_IGNORE_SQ_OVERFLOW;
+		}
+
+		if (attr->create_flags & IBV_QP_CREATE_IGNORE_RQ_OVERFLOW) {
+			qp->flags |= MLX5_QP_FLAGS_IGNORE_RQ_OVERFLOW;
+		}
+
+		attr->create_flags &= ~(IBV_QP_CREATE_IGNORE_SQ_OVERFLOW | IBV_QP_CREATE_IGNORE_RQ_OVERFLOW);
 	}
 
 	if ((attr->comp_mask & IBV_QP_INIT_ATTR_CREATE_FLAGS) &&

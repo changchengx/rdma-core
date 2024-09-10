@@ -720,6 +720,39 @@ struct mlx5_qp {
 	uint8_t				need_mmo_enable:1;
 };
 
+struct mlx5_devx_qp {
+	struct ibv_qp qp;
+
+	void *wq_buf;
+	struct mlx5dv_devx_umem  *wq_umem;
+	uint32_t wq_buf_len;
+
+	void *wq_sq_start;
+	uint32_t sq_wqe_cnt;
+	uint32_t sq_wqe_shift;
+	uint32_t sq_max_gs;
+	uint32_t sq_max_post;
+	uint32_t sq_head;
+	uint32_t sq_tail;
+	uint32_t sq_cur_post;
+	uint32_t sq_pending_req;
+
+	void *wq_rq_start;
+	uint32_t rq_wqe_cnt;
+	uint32_t rq_wqe_shift;
+	uint32_t rq_max_gs;
+	uint32_t rq_max_post;
+	uint32_t rq_head;
+	uint32_t rq_tail;
+
+	struct mlx5_wqe_ctrl_seg *cur_ctrl;
+	struct mlx5_bf *bf; // 1) ring doorbell with wqe/ctrl 2) ring doorbell with whole wqe(blueflame)
+	__be32 *dbr; // used to update doorbell record
+	struct mlx5dv_devx_umem  *db_umem;
+
+	struct mlx5dv_devx_obj *devx_obj;
+};
+
 struct mlx5_ah {
 	struct ibv_ah			ibv_ah;
 	struct mlx5_wqe_av		av;

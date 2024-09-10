@@ -351,6 +351,18 @@ struct ibv_qp *mlx5dv_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,
 				struct mlx5dv_qp_init_attr *mlx5_qp_attr);
 
+int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen);
+
+int mlx5dv_devx_ring_db(struct ibv_qp *qp);
+
+struct ibv_qp *mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
+				struct ibv_qp_init_attr_ex *qp_attr,
+				struct mlx5dv_qp_init_attr *mlx5_qp_attr);
+
+int mlx5dv_wrap_devx_modify_qp_init2rtr(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
+
+int mlx5dv_wrap_devx_modify_qp_rtr2rts(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
+
 struct mlx5dv_mr_interleaved {
 	uint64_t        addr;
 	uint32_t        bytes_count;

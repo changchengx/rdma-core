@@ -351,6 +351,11 @@ struct ibv_qp *mlx5dv_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,
 				struct mlx5dv_qp_init_attr *mlx5_qp_attr);
 
+struct ibv_qp *mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
+				struct ibv_qp_init_attr_ex *qp_attr,
+				struct mlx5dv_qp_init_attr *mlx5_qp_attr);
+
+
 struct mlx5dv_mr_interleaved {
 	uint64_t        addr;
 	uint32_t        bytes_count;

@@ -6855,6 +6855,24 @@ ssize_t mlx5dv_devx_get_event(struct mlx5dv_devx_event_channel *event_channel,
 				      event_resp_len);
 }
 
+static
+struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
+				struct ibv_qp_init_attr_ex *qp_attr,
+				struct mlx5dv_qp_init_attr *mlx5_qp_attr)
+{
+	uint32_t __attribute__((unused)) out[DEVX_ST_SZ_DW(create_qp_out)] = {};
+	uint32_t __attribute__((unused)) in[DEVX_ST_SZ_DW(create_qp_in)] = {};
+
+	return NULL;
+}
+
+struct ibv_qp *mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
+				struct ibv_qp_init_attr_ex *qp_attr,
+				struct mlx5dv_qp_init_attr *mlx5_qp_attr)
+{
+	return _mlx5dv_wrap_devx_create_qp(context, qp_attr, mlx5_qp_attr);
+}
+
 static struct mlx5dv_mkey *
 _mlx5dv_create_mkey(struct mlx5dv_mkey_init_attr *mkey_init_attr)
 {

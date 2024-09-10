@@ -720,6 +720,19 @@ struct mlx5_qp {
 	uint8_t				need_mmo_enable:1;
 };
 
+struct mlx5_devx_qp {
+	struct ibv_qp qp;
+
+	void *wq_buf;
+	struct mlx5dv_devx_umem  *wq_umem;
+	uint32_t wq_buf_len;
+
+	__be32 *db;
+	struct mlx5dv_devx_umem  *db_umem;
+
+	struct mlx5dv_devx_obj *devx_obj;
+};
+
 struct mlx5_ah {
 	struct ibv_ah			ibv_ah;
 	struct mlx5_wqe_av		av;

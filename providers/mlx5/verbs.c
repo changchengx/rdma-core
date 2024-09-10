@@ -6855,15 +6855,164 @@ ssize_t mlx5dv_devx_get_event(struct mlx5dv_devx_event_channel *event_channel,
 				      event_resp_len);
 }
 
+static uint32_t ceil_log2(uint32_t v)
+{
+	/* [0]    => 0 [1, 2] => 1
+	 * [3, 4] => 2 [5, 8] => 3
+	 */
+	static const uint32_t bits_arr[] = {0x2, 0xC, 0xF0, 0xFF00, 0xFFFF0000};
+	static const uint32_t shift_arr[] = {1, 2, 4, 8, 16};
+	int i;
+	uint32_t input_val = v;
+
+	if (v == 1) {
+		return 1;
+	}
+
+	uint32_t r = 0;/* result of log2(v) will go here */
+	for (i = 4; i >= 0; i--) {
+		if (v & bits_arr[i]) {
+			v >>= shift_arr[i];
+			r |= shift_arr[i];
+		}
+	}
+	/* Rounding up if required */
+	r += !!(input_val & ((1 << r) - 1));
+
+	return r;
+}
+
 static
 struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,
 				struct mlx5dv_qp_init_attr *mlx5_qp_attr)
 {
-	uint32_t __attribute__((unused)) out[DEVX_ST_SZ_DW(create_qp_out)] = {};
-	uint32_t __attribute__((unused)) in[DEVX_ST_SZ_DW(create_qp_in)] = {};
+	struct mlx5_context *mctx = to_mctx(context);
 
-	return NULL;
+	uint32_t out[DEVX_ST_SZ_DW(create_qp_out)] = {};
+	uint32_t in[DEVX_ST_SZ_DW(create_qp_in)] = {};
+	struct mlx5dv_obj dv_obj;
+	void *qpc;
+
+	// opcode: create qp
+	DEVX_SET(create_qp_in, in, opcode, MLX5_CMD_OP_CREATE_QP);
+
+	qpc = DEVX_ADDR_OF(create_qp_in, in, qpc);
+
+	// qp type: rc
+	DEVX_SET(qpc, qpc, st, MLX5_QPC_ST_RC);
+	DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
+
+	memset(&dv_obj, 0, sizeof(dv_obj));
+	struct mlx5dv_pd mlx5_pd = {};
+	dv_obj.pd.in = qp_attr->pd;
+	dv_obj.pd.out = &mlx5_pd;
+	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_PD)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get pd dv obj\n", __func__, __LINE__);
+		return NULL;
+	};
+	DEVX_SET(qpc, qpc, pd, mlx5_pd.pdn);
+
+	struct mlx5_bf *bf = mlx5_get_qp_uar(context); //TODO: use mlx5dv_devx_alloc_uar
+	if (!bf || bf->dyn_alloc_uar != true) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: not support further op\n", __func__, __LINE__);
+		return NULL;
+	}
+	DEVX_SET(qpc, qpc, uar_page, bf->page_id);
+
+	DEVX_SET(qpc, qpc, rq_type, 0); // use reguar RQ(not SRQ, not zero size RQ))
+
+	memset(&dv_obj, 0, sizeof(dv_obj));
+	struct mlx5dv_cq mlx5_cq = {};
+	dv_obj.cq.in = qp_attr->send_cq;
+	dv_obj.cq.out = &mlx5_cq;
+	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_CQ)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get send_cq dv obj\n", __func__, __LINE__);
+		return NULL;
+	};
+	DEVX_SET(qpc, qpc, cqn_snd, mlx5_cq.cqn);
+
+	memset(&dv_obj, 0, sizeof(dv_obj));
+	memset(&mlx5_cq, 0, sizeof(mlx5_cq));
+	dv_obj.cq.in = qp_attr->recv_cq;
+	dv_obj.cq.out = &mlx5_cq;
+	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_CQ)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get recv_cq dv obj\n", __func__, __LINE__);
+		return NULL;
+	};
+	DEVX_SET(qpc, qpc, cqn_rcv, mlx5_cq.cqn);
+
+	int max_tx, max_rx, len;
+	max_tx = qp_attr->cap.max_send_wr * 4; // Every SQ/WQE has 4 SEND_WQE_BB
+	DEVX_SET(qpc, qpc, log_sq_size, ceil_log2(max_tx));
+	qp_attr->cap.max_send_wr = (1 << ceil_log2(max_tx)) / 4;
+	len = max_tx * MLX5_SEND_WQE_BB; // Every SEND_WQE_BB is 64 Bytes
+
+	max_rx = qp_attr->cap.max_recv_wr;
+	DEVX_SET(qpc, qpc, log_rq_size, ceil_log2(max_rx));
+	qp_attr->cap.max_recv_wr = 1 << ceil_log2(max_rx);
+	DEVX_SET(qpc, qpc, log_rq_stride, 2); // Every RQ/WQE equals 64 Bytes(2^2 * 16)
+	len += max_rx * 4 * 16;
+
+	struct mlx5dv_devx_umem *wq_umem = NULL;
+	void *wq_buf = NULL;
+	if (posix_memalign(&wq_buf, sysconf(_SC_PAGESIZE), len)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to wq buf memory\n", __func__, __LINE__);
+		return NULL;
+	} else {
+		wq_umem = mlx5dv_devx_umem_reg(context, wq_buf, len, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+		if (wq_umem == NULL) {
+			mlx5_err(mctx->dbg_fp, "%s:%04d: failed to reg wq buf mem\n", __func__, __LINE__);
+			return NULL;
+		}
+	}
+	DEVX_SET(create_qp_in, in, wq_umem_id, wq_umem->umem_id);
+
+	DEVX_SET(qpc, qpc, cs_req, 0); // data is always scattered according to send WQE.scatter list
+	DEVX_SET(qpc, qpc, cs_res, 0); // data will always be scattered to the receive buffer
+
+	struct mlx5dv_devx_umem *db_umem = NULL;
+	__be32 *db = NULL;
+	if (posix_memalign((void **)&db, 8, 8)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to allocate db memory\n", __func__, __LINE__);
+		return NULL;
+	} else {
+		db_umem = mlx5dv_devx_umem_reg(context, db, 8, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+		if (db_umem == NULL) {
+			mlx5_err(mctx->dbg_fp, "%s:%04d: failed to allocate db memory\n", __func__, __LINE__);
+			return NULL;
+		}
+	}
+	DEVX_SET64(qpc, qpc, dbr_addr, 0);
+	DEVX_SET(qpc, qpc, dbr_umem_id, db_umem->umem_id);
+
+	struct mlx5dv_devx_obj *devx_obj = mlx5dv_devx_obj_create(context, in, sizeof(in), out, sizeof(out));
+	if (devx_obj == NULL) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to create qp with devx, err_syndrome:0x%08x\n", __func__, __LINE__, err_syndrome);
+		return NULL;
+	}
+
+	struct mlx5_devx_qp	*devx_qp = calloc(1, sizeof(struct mlx5_devx_qp));
+	devx_qp->devx_obj = devx_obj;
+	devx_qp->wq_buf = wq_buf;
+	devx_qp->wq_umem = wq_umem;
+
+	devx_qp->db = db;
+	devx_qp->db_umem = db_umem;
+
+	struct ibv_qp *ibqp = &devx_qp->qp;
+	ibqp->qp_num = DEVX_GET(create_qp_out, out, qpn);
+	ibqp->context = context;
+	ibqp->pd = qp_attr->pd;
+	ibqp->send_cq = qp_attr->send_cq;
+	ibqp->recv_cq = qp_attr->recv_cq;
+	ibqp->state = IBV_QPS_RESET;
+	ibqp->qp_type = IBV_QPT_RC;
+
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "create qp:0x%06x with devx\n", ibqp->qp_num);
+
+	return ibqp;
 }
 
 struct ibv_qp *mlx5dv_wrap_devx_create_qp(struct ibv_context *context,

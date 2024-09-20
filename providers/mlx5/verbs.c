@@ -3508,7 +3508,7 @@ create_cmd_qp(struct ibv_context *context,
 	}
 
 	attr.qp_state = IBV_QPS_RTR;
-	attr.path_mtu = IBV_MTU_256;
+	attr.path_mtu = IBV_MTU_1024;
 	attr.dest_qp_num = qp->qp_num; /* Loopback */
 	attr.ah_attr.dlid = port_attr.lid;
 	attr.ah_attr.port_num = port;
@@ -6882,6 +6882,40 @@ static uint32_t ceil_log2(uint32_t v)
 	return r;
 }
 
+static int mlx5dv_devx_qp_rst2init(struct mlx5_devx_qp *devx_qp)
+{
+	int ret;
+	struct mlx5_context *mctx = to_mctx(devx_qp->qp.context);
+
+	if (devx_qp->qp.state == IBV_QPS_INIT) {
+		return 0;
+	}
+
+	uint32_t in[DEVX_ST_SZ_DW(rst2init_qp_in)] = {};
+	uint32_t out[DEVX_ST_SZ_DW(rst2init_qp_out)] = {};
+
+	DEVX_SET(rst2init_qp_in, in, opcode, MLX5_CMD_OP_RST2INIT_QP);
+	DEVX_SET(rst2init_qp_in, in, qpn, devx_qp->qp.qp_num);
+
+	void *qpc = DEVX_ADDR_OF(rst2init_qp_in, in, qpc);
+	DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
+	DEVX_SET(qpc, qpc, primary_address_path.vhca_port_num, 1); // always fix to fi/1st port.
+
+	DEVX_SET(qpc, qpc, rwe, 1); // enable remote RDMA WRITE operation.
+	DEVX_SET(qpc, qpc, rre, 1); // enable remote RDMA READ operation.
+
+	ret = mlx5dv_devx_obj_modify(devx_qp->devx_obj, in, sizeof(in), out, sizeof(out));
+	if (ret != 0) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to modify qp:0x%06x rst2init with devx, err_syndrome:0x%08x\n",
+		         __func__, __LINE__, devx_qp->qp.qp_num, err_syndrome);
+	} else {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "success qp:0x%06x rst2init\n", devx_qp->qp.qp_num);
+	}
+
+	return ret;
+}
+
 static
 struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,
@@ -7011,6 +7045,13 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	ibqp->qp_type = IBV_QPT_RC;
 
 	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "create qp:0x%06x with devx\n", ibqp->qp_num);
+
+	if (mlx5dv_devx_qp_rst2init(devx_qp)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed set qp:0x%06x into init state\n",
+		        __func__, __LINE__, devx_qp->qp.qp_num);
+	} else {
+		ibqp->state = IBV_QPS_INIT;
+	}
 
 	return ibqp;
 }

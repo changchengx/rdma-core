@@ -7063,6 +7063,67 @@ struct ibv_qp *mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	return _mlx5dv_wrap_devx_create_qp(context, qp_attr, mlx5_qp_attr);
 }
 
+static int _mlx5dv_wrap_devx_modify_qp_init2rtr(struct mlx5_devx_qp *devx_qp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	int ret;
+	struct mlx5_context *mctx = to_mctx(devx_qp->qp.context);
+
+	uint32_t out[DEVX_ST_SZ_DW(init2rtr_qp_out)] = {};
+	uint32_t in[DEVX_ST_SZ_DW(init2rtr_qp_in)] = {};
+	void *qpc;
+
+	DEVX_SET(init2rtr_qp_in, in, opcode, MLX5_CMD_OP_INIT2RTR_QP);
+	DEVX_SET(init2rtr_qp_in, in, qpn, devx_qp->qp.qp_num);
+
+	qpc = DEVX_ADDR_OF(init2rtr_qp_in, in, qpc);
+	DEVX_SET(qpc, qpc, mtu, IBV_MTU_1024);
+	DEVX_SET(qpc, qpc, log_msg_max, 30); //max message size 2^30 bytes
+	DEVX_SET(qpc, qpc, remote_qpn, attr->dest_qp_num); //max message size 2^30 bytes
+
+	//RoCE
+	struct ibv_ah *ah = mlx5_create_ah(devx_qp->qp.pd, &attr->ah_attr);
+	struct mlx5_ah *mah = to_mah(ah);
+
+	memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rmac_47_32), mah->av.rmac, sizeof(mah->av.rmac));
+	memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rgid_rip), mah->av.rgid, sizeof(mah->av.rgid));
+	mlx5_destroy_ah(ah);
+	ah = NULL; mah = NULL;
+
+	DEVX_SET(qpc, qpc, primary_address_path.hop_limit, attr->ah_attr.grh.hop_limit);
+	DEVX_SET(qpc, qpc, primary_address_path.src_addr_index, attr->ah_attr.grh.sgid_index);
+
+	//RoCEv2
+	DEVX_SET(qpc, qpc, primary_address_path.udp_sport, IB_ROCE_UDP_ENCAP_VALID_PORT_MIN);
+	DEVX_SET(qpc, qpc, primary_address_path.dscp, IB_ROCE_UDP_ENCAP_VALID_PORT_MIN);
+
+	DEVX_SET(qpc, qpc, primary_address_path.vhca_port_num, attr->ah_attr.port_num);
+	DEVX_SET(qpc, qpc, min_rnr_nak, 1);
+	DEVX_SET(qpc, qpc, min_rnr_nak, 1);
+	DEVX_SET(qpc, qpc, next_rcv_psn, attr->rq_psn);
+
+	DEVX_SET(qpc, qpc, log_rra_max, 0); // Max 1(2^0) outstanding RDMA_READ or Atomic operation on the RQ.
+	DEVX_SET(qpc, qpc, rwe, 1); // enable remote RDMA WRITE operation.
+	DEVX_SET(qpc, qpc, rre, 1); // enable remote RDMA READ operation.
+
+	DEVX_SET(qpc, qpc, min_rnr_nak, 0x12);
+	DEVX_SET(init2rtr_qp_in, in, opt_param_mask, (1 << 1) | (1 << 3));
+	ret = mlx5dv_devx_obj_modify(devx_qp->devx_obj, in, sizeof(in), out, sizeof(out));
+	if (ret != 0) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to modify qp:0x%06x init2rtr with devx, err_syndrome:0x%08x\n",
+		         __func__, __LINE__, devx_qp->qp.qp_num, err_syndrome);
+	} else {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "success qp:0x%06x init2rtr\n", devx_qp->qp.qp_num);
+	}
+
+	return ret;
+}
+
+int mlx5dv_wrap_devx_modify_qp_init2rtr(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	return _mlx5dv_wrap_devx_modify_qp_init2rtr((struct mlx5_devx_qp*)qp, attr, attr_mask);
+}
+
 static struct mlx5dv_mkey *
 _mlx5dv_create_mkey(struct mlx5dv_mkey_init_attr *mkey_init_attr)
 {

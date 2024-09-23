@@ -7124,6 +7124,46 @@ int mlx5dv_wrap_devx_modify_qp_init2rtr(struct ibv_qp *qp, struct ibv_qp_attr *a
 	return _mlx5dv_wrap_devx_modify_qp_init2rtr((struct mlx5_devx_qp*)qp, attr, attr_mask);
 }
 
+static int _mlx5dv_wrap_devx_modify_qp_rtr2rts(struct mlx5_devx_qp *devx_qp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	int ret;
+	struct mlx5_context *mctx = to_mctx(devx_qp->qp.context);
+
+	uint32_t out[DEVX_ST_SZ_DW(rtr2rts_qp_out)] = {};
+	uint32_t in[DEVX_ST_SZ_DW(rtr2rts_qp_in)] = {};
+
+	void *qpc;
+	qpc = DEVX_ADDR_OF(rtr2rts_qp_in, in, qpc);
+	DEVX_SET(rtr2rts_qp_in, in, opcode, MLX5_CMD_OP_RTR2RTS_QP);
+	DEVX_SET(rtr2rts_qp_in, in, qpn, devx_qp->qp.qp_num);
+
+	DEVX_SET(qpc, qpc, log_rra_max, 0); // Max 1(2^0) outstanding RDMA_READ or Atomic operation on the requetor.
+
+	DEVX_SET(qpc, qpc, retry_count, attr->retry_cnt);
+	DEVX_SET(qpc, qpc, rnr_retry, attr->rnr_retry);
+
+	DEVX_SET(qpc, qpc, primary_address_path.ack_timeout, attr->timeout);
+	DEVX_SET(qpc, qpc, primary_address_path.reserved_at_50, 0); // log_rtm = 0, No need to extend timeout
+
+	DEVX_SET(qpc, qpc, log_ack_req_freq, 0); // UCX default 8
+
+	ret = mlx5dv_devx_obj_modify(devx_qp->devx_obj, in, sizeof(in), out, sizeof(out));
+	if (ret != 0) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to modify qp:0x%06x rtr2rts with devx, err_syndrome:0x%08x\n",
+		         __func__, __LINE__, devx_qp->qp.qp_num, err_syndrome);
+	} else {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "success qp:0x%06x rtr2rts\n", devx_qp->qp.qp_num);
+	}
+
+	return ret;
+}
+
+int mlx5dv_wrap_devx_modify_qp_rtr2rts(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	return _mlx5dv_wrap_devx_modify_qp_rtr2rts((struct mlx5_devx_qp*)qp, attr, attr_mask);
+}
+
 static struct mlx5dv_mkey *
 _mlx5dv_create_mkey(struct mlx5dv_mkey_init_attr *mkey_init_attr)
 {

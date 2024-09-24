@@ -6916,6 +6916,30 @@ static int mlx5dv_devx_qp_rst2init(struct mlx5_devx_qp *devx_qp)
 	return ret;
 }
 
+int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen)
+{
+	struct mlx5_context *mctx = to_mctx(qp->context);
+	struct mlx5_devx_qp *devx_qp = (struct mlx5_devx_qp*)qp;
+	struct mlx5dv_devx_obj *devx_obj = devx_qp->devx_obj;
+
+	uint32_t in[DEVX_ST_SZ_DW(query_qp_in)] = {};
+	int ret;
+
+	DEVX_SET(query_qp_in, in, opcode, MLX5_CMD_OP_QUERY_QP);
+	DEVX_SET(query_qp_in, in, qpn, qp->qp_num);
+
+	ret = mlx5dv_devx_obj_query(devx_obj, in, sizeof(in), out, outlen);
+	if (ret != 0) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to query qp:0x%06x with devx, err_syndrome:0x%08x\n",
+		         __func__, __LINE__, devx_qp->qp.qp_num, err_syndrome);
+	} else {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "success to query qp:0x%06x with devx\n", devx_qp->qp.qp_num);
+	}
+
+	return ret;
+}
+
 static
 struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,

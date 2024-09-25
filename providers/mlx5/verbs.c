@@ -6940,6 +6940,25 @@ int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen)
 	return ret;
 }
 
+int mlx5dv_devx_ring_db(struct ibv_qp *qp)
+{
+	struct mlx5_context *mctx = to_mctx(qp->context);
+	struct mlx5_devx_qp *devx_qp = (struct mlx5_devx_qp*)qp;
+
+	if (devx_qp->sq_pending_wqe == 0) {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x no pending SQ WQE\n", qp->qp_num);
+		return 0;
+	}
+
+	udma_to_device_barrier();
+	devx_qp->db[MLX5_SND_DBR] = htobe32(devx_qp->sq_wqebb_cnt_post & 0xffff);
+	mmio_wc_start();
+
+	devx_qp->sq_pending_wqe = 0;
+
+	return 0;
+}
+
 static
 struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,
@@ -7000,17 +7019,18 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	};
 	DEVX_SET(qpc, qpc, cqn_rcv, mlx5_cq.cqn);
 
-	int max_tx, max_rx, len;
+	int max_tx, max_rx, len, rx_len;
 	max_tx = qp_attr->cap.max_send_wr * 4; // Every SQ/WQE has 4 SEND_WQE_BB
 	DEVX_SET(qpc, qpc, log_sq_size, ceil_log2(max_tx));
 	qp_attr->cap.max_send_wr = (1 << ceil_log2(max_tx)) / 4;
-	len = max_tx * MLX5_SEND_WQE_BB; // Every SEND_WQE_BB is 64 Bytes
+	len = max_tx * MLX5_SEND_WQE_BB; // Every SEND_WQE_BB is 64 Bytes, Every SQ WQE is 256 Bytes.
 
 	max_rx = qp_attr->cap.max_recv_wr;
 	DEVX_SET(qpc, qpc, log_rq_size, ceil_log2(max_rx));
 	qp_attr->cap.max_recv_wr = 1 << ceil_log2(max_rx);
 	DEVX_SET(qpc, qpc, log_rq_stride, 2); // Every RQ/WQE equals 64 Bytes(2^2 * 16)
-	len += max_rx * 4 * 16;
+	rx_len = max_rx * 4 * 16;
+	len += rx_len;
 
 	struct mlx5dv_devx_umem *wq_umem = NULL;
 	void *wq_buf = NULL;
@@ -7051,10 +7071,18 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 		return NULL;
 	}
 
-	struct mlx5_devx_qp	*devx_qp = calloc(1, sizeof(struct mlx5_devx_qp));
+	struct mlx5_devx_qp *devx_qp = calloc(1, sizeof(struct mlx5_devx_qp));
 	devx_qp->devx_obj = devx_obj;
 	devx_qp->wq_buf = wq_buf;
 	devx_qp->wq_umem = wq_umem;
+
+	devx_qp->rq_wqe_start = wq_buf;
+	devx_qp->rq_max_wqe_cnt = qp_attr->cap.max_recv_wr;
+
+	devx_qp->sq_wqe_start = wq_buf + rx_len;
+	devx_qp->sq_max_wqe_cnt = qp_attr->cap.max_send_wr;
+	devx_qp->sq_wqebb_cnt_post = 0;
+	devx_qp->sq_pending_wqe = 0;
 
 	devx_qp->db = db;
 	devx_qp->db_umem = db_umem;

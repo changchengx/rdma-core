@@ -727,13 +727,23 @@ struct mlx5_devx_qp {
 	struct mlx5dv_devx_umem  *wq_umem;
 	uint32_t wq_buf_len;
 
-	void *sq_wqe_start;
-	void *rq_wqe_start;
+	void *wq_sq_start;
+	uint32_t sq_wqe_cnt;
+	uint32_t sq_wqe_shift;
+	uint32_t sq_max_gs;
+	uint32_t sq_max_post;
+	uint32_t sq_head;
+	uint32_t sq_tail;
+	uint32_t sq_cur_post;
+	uint32_t sq_pending_req;
 
-	uint32_t sq_max_wqe_cnt;
-	uint32_t sq_wqebb_cnt_post; // Eevery SQ WQE use 4 WQEBB
-	uint32_t sq_pending_wqe;
-	uint32_t rq_max_wqe_cnt;
+	void *wq_rq_start;
+	uint32_t rq_wqe_cnt;
+	uint32_t rq_wqe_shift;
+	uint32_t rq_max_gs;
+	uint32_t rq_max_post;
+	uint32_t rq_head;
+	uint32_t rq_tail;
 
 	__be32 *db;
 	struct mlx5dv_devx_umem  *db_umem;

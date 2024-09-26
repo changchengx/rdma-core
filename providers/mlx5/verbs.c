@@ -6940,30 +6940,34 @@ int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen)
 	return ret;
 }
 
-void mlx5_devx_post_rdma_write(struct ibv_qp*qp, uint32_t rkey, uint64_t remote_addr, uint32_t lkey, uint64_t local_addr, uint32_t length)
+void mlx5_devx_post_rdma_write(struct ibv_qp* qp, uint32_t rkey, uint64_t remote_addr, uint32_t lkey, uint64_t local_addr, uint32_t length)
 {
 	struct mlx5_context *mctx = to_mctx(qp->context);
 	struct mlx5_devx_qp *devx_qp = (struct mlx5_devx_qp*)qp;
 
-	uint32_t idx = devx_qp->sq_wqebb_cnt_post & (devx_qp->sq_max_wqe_cnt * 4 - 1);
-	struct mlx5_wqe_ctrl_seg *ctrl = devx_qp->sq_wqe_start + (idx << MLX5_SEND_WQE_SHIFT) * 4;
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x starting post rdma_write wqe at:%04d\n", qp->qp_num, devx_qp->sq_cur_post);
+	uint32_t idx = devx_qp->sq_cur_post & (devx_qp->sq_wqe_cnt - 1);
+	struct mlx5_wqe_ctrl_seg *ctrl = devx_qp->wq_sq_start + (idx << devx_qp->sq_wqe_shift);
 	memset(ctrl, 0, sizeof(*ctrl));
 
-	ctrl->opmod_idx_opcode = htobe32(((devx_qp->sq_wqebb_cnt_post & 0xffff) << 8) | MLX5_OPCODE_RDMA_WRITE);
-	ctrl->qpn_ds = htobe32(devx_qp->qp.qp_num << 8 | 3); // #TODO correct ds
+	ctrl->opmod_idx_opcode = htobe32(((devx_qp->sq_cur_post & 0xffff) << 8) | MLX5_OPCODE_RDMA_WRITE);
+	ctrl->fm_ce_se = 0; // MLX5_WQE_CTRL_CQ_UPDATE | MLX5_WQE_CTRL_FENCE | MLX5_WQE_CTRL_SOLICITED;
 
 	struct mlx5_wqe_raddr_seg *rseg = (void*)(ctrl + 1);
 	rseg->raddr = htobe64(remote_addr);
 	rseg->rkey = htobe32(rkey);
 	rseg->reserved = 0;
+	devx_qp->sq_pending_req++;
 
 	struct mlx5_wqe_data_seg *dseg = (void*)(rseg + 1);
 	dseg->byte_count = htobe32(length);
 	dseg->lkey = htobe32(lkey);
 	dseg->addr = htobe64(local_addr);
 
-	devx_qp = (struct mlx5_devx_qp*)qp;
-	devx_qp->sq_wqebb_cnt_post++; // correct cnt_post
+	ctrl->qpn_ds = htobe32((devx_qp->qp.qp_num << 8) | 3); // ds:3, one ctrl seg + one rdata seg + one local data seg
+
+	devx_qp->sq_cur_post++; // one sq WQE is at least MLX5_SEND_WQE_BB even though only use 48B
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x end move to next wqe slot at:%04d\n", qp->qp_num, devx_qp->sq_cur_post);
 }
 
 int mlx5dv_devx_ring_db(struct ibv_qp *qp)
@@ -6971,16 +6975,17 @@ int mlx5dv_devx_ring_db(struct ibv_qp *qp)
 	struct mlx5_context *mctx = to_mctx(qp->context);
 	struct mlx5_devx_qp *devx_qp = (struct mlx5_devx_qp*)qp;
 
-	if (devx_qp->sq_pending_wqe == 0) {
+	if (devx_qp->sq_pending_req == 0) {
 		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x no pending SQ WQE\n", qp->qp_num);
 		return 0;
 	}
 
 	udma_to_device_barrier();
-	devx_qp->db[MLX5_SND_DBR] = htobe32(devx_qp->sq_wqebb_cnt_post & 0xffff);
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x ring db at:%04d\n", qp->qp_num, devx_qp->sq_cur_post & 0xffff);
+	devx_qp->db[MLX5_SND_DBR] = htobe32(devx_qp->sq_cur_post & 0xffff);
 	mmio_wc_start();
 
-	devx_qp->sq_pending_wqe = 0;
+	devx_qp->sq_pending_req = 0;
 
 	return 0;
 }
@@ -6996,6 +7001,8 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	uint32_t in[DEVX_ST_SZ_DW(create_qp_in)] = {};
 	struct mlx5dv_obj dv_obj;
 	void *qpc;
+
+	struct mlx5_devx_qp *devx_qp = calloc(1, sizeof(struct mlx5_devx_qp));
 
 	// opcode: create qp
 	DEVX_SET(create_qp_in, in, opcode, MLX5_CMD_OP_CREATE_QP);
@@ -7045,32 +7052,43 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	};
 	DEVX_SET(qpc, qpc, cqn_rcv, mlx5_cq.cqn);
 
-	int max_tx, max_rx, len, rx_len;
-	max_tx = qp_attr->cap.max_send_wr * 4; // Every SQ/WQE has 4 SEND_WQE_BB
-	DEVX_SET(qpc, qpc, log_sq_size, ceil_log2(max_tx));
-	qp_attr->cap.max_send_wr = (1 << ceil_log2(max_tx)) / 4;
-	len = max_tx * MLX5_SEND_WQE_BB; // Every SEND_WQE_BB is 64 Bytes, Every SQ WQE is 256 Bytes.
+	struct mlx5_qp fake_qp = {};
+	fake_qp.buf_size = mlx5_calc_wq_size(mctx, qp_attr, mlx5_qp_attr, &fake_qp);
+	devx_qp->sq_wqe_cnt = fake_qp.sq.wqe_cnt;
+	DEVX_SET(qpc, qpc, log_sq_size, ceil_log2(devx_qp->sq_wqe_cnt));
+	devx_qp->sq_wqe_shift = fake_qp.sq.wqe_shift;
+	int sq_buf_len = devx_qp->sq_wqe_cnt * (1 << devx_qp->sq_wqe_shift);
+	devx_qp->sq_max_gs = fake_qp.sq.max_gs;
+	devx_qp->sq_max_post = fake_qp.sq.max_post;
 
-	max_rx = qp_attr->cap.max_recv_wr;
-	DEVX_SET(qpc, qpc, log_rq_size, ceil_log2(max_rx));
-	qp_attr->cap.max_recv_wr = 1 << ceil_log2(max_rx);
-	DEVX_SET(qpc, qpc, log_rq_stride, 2); // Every RQ/WQE equals 64 Bytes(2^2 * 16)
-	rx_len = max_rx * 4 * 16;
-	len += rx_len;
+	devx_qp->rq_wqe_cnt = fake_qp.rq.wqe_cnt;
+	DEVX_SET(qpc, qpc, log_rq_size, ceil_log2(devx_qp->rq_wqe_cnt));
+	devx_qp->rq_wqe_shift = fake_qp.rq.wqe_shift;
+	DEVX_SET(qpc, qpc, log_rq_stride, ceil_log2((1 << devx_qp->rq_wqe_shift) >> 4)); // Every RQ/WQE equals (16 * 2^log_rq_stride) Bytes
+	devx_qp->rq_max_gs = fake_qp.rq.max_gs;
+	devx_qp->rq_max_post = fake_qp.rq.max_post;
+	int rq_buf_len = devx_qp->sq_wqe_cnt * MLX5_SEND_WQE_BB;
+	devx_qp->wq_buf_len = rq_buf_len + sq_buf_len;
 
 	struct mlx5dv_devx_umem *wq_umem = NULL;
 	void *wq_buf = NULL;
-	if (posix_memalign(&wq_buf, sysconf(_SC_PAGESIZE), len)) {
+	if (posix_memalign(&wq_buf, sysconf(_SC_PAGESIZE), devx_qp->wq_buf_len)) {
 		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to wq buf memory\n", __func__, __LINE__);
 		return NULL;
 	} else {
-		wq_umem = mlx5dv_devx_umem_reg(context, wq_buf, len, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+		memset(wq_buf, 0, devx_qp->wq_buf_len);
+		wq_umem = mlx5dv_devx_umem_reg(context, wq_buf, devx_qp->wq_buf_len, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 		if (wq_umem == NULL) {
 			mlx5_err(mctx->dbg_fp, "%s:%04d: failed to reg wq buf mem\n", __func__, __LINE__);
 			return NULL;
 		}
 	}
 	DEVX_SET(create_qp_in, in, wq_umem_id, wq_umem->umem_id);
+	devx_qp->wq_buf = wq_buf;
+	devx_qp->wq_umem = wq_umem;
+
+	devx_qp->wq_rq_start = wq_buf;
+	devx_qp->wq_sq_start = wq_buf + rq_buf_len;
 
 	DEVX_SET(qpc, qpc, cs_req, 0); // data is always scattered according to send WQE.scatter list
 	DEVX_SET(qpc, qpc, cs_res, 0); // data will always be scattered to the receive buffer
@@ -7090,6 +7108,9 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	DEVX_SET64(qpc, qpc, dbr_addr, 0);
 	DEVX_SET(qpc, qpc, dbr_umem_id, db_umem->umem_id);
 
+	devx_qp->db = db;
+	devx_qp->db_umem = db_umem;
+
 	struct mlx5dv_devx_obj *devx_obj = mlx5dv_devx_obj_create(context, in, sizeof(in), out, sizeof(out));
 	if (devx_obj == NULL) {
 		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
@@ -7097,21 +7118,7 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 		return NULL;
 	}
 
-	struct mlx5_devx_qp *devx_qp = calloc(1, sizeof(struct mlx5_devx_qp));
 	devx_qp->devx_obj = devx_obj;
-	devx_qp->wq_buf = wq_buf;
-	devx_qp->wq_umem = wq_umem;
-
-	devx_qp->rq_wqe_start = wq_buf;
-	devx_qp->rq_max_wqe_cnt = qp_attr->cap.max_recv_wr;
-
-	devx_qp->sq_wqe_start = wq_buf + rx_len;
-	devx_qp->sq_max_wqe_cnt = qp_attr->cap.max_send_wr;
-	devx_qp->sq_wqebb_cnt_post = 0;
-	devx_qp->sq_pending_wqe = 0;
-
-	devx_qp->db = db;
-	devx_qp->db_umem = db_umem;
 
 	struct ibv_qp *ibqp = &devx_qp->qp;
 	ibqp->qp_num = DEVX_GET(create_qp_out, out, qpn);

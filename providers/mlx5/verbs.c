@@ -6913,6 +6913,37 @@ int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen)
 	return ret;
 }
 
+void mlx5_devx_post_rdma_write(struct ibv_qp* qp, uint32_t rkey, uint64_t remote_addr, uint32_t lkey, uint64_t local_addr, uint32_t length)
+{
+	struct mlx5_context *mctx = to_mctx(qp->context);
+	struct mlx5_devx_qp *devx_qp = (struct mlx5_devx_qp*)qp;
+
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x starting post rdma_write wqe at:%04d\n", qp->qp_num, devx_qp->sq_cur_post);
+	uint32_t idx = devx_qp->sq_cur_post & (devx_qp->sq_wqe_cnt - 1);
+	struct mlx5_wqe_ctrl_seg *ctrl = devx_qp->wq_sq_start + (idx << devx_qp->sq_wqe_shift);
+	memset(ctrl, 0, sizeof(*ctrl));
+
+	ctrl->opmod_idx_opcode = htobe32(((devx_qp->sq_cur_post & 0xffff) << 8) | MLX5_OPCODE_RDMA_WRITE);
+	ctrl->fm_ce_se = 0; // MLX5_WQE_CTRL_CQ_UPDATE | MLX5_WQE_CTRL_FENCE | MLX5_WQE_CTRL_SOLICITED;
+
+	struct mlx5_wqe_raddr_seg *rseg = (void*)(ctrl + 1);
+	rseg->raddr = htobe64(remote_addr);
+	rseg->rkey = htobe32(rkey);
+	rseg->reserved = 0;
+	devx_qp->sq_pending_req++;
+
+	struct mlx5_wqe_data_seg *dseg = (void*)(rseg + 1);
+	dseg->byte_count = htobe32(length);
+	dseg->lkey = htobe32(lkey);
+	dseg->addr = htobe64(local_addr);
+
+	ctrl->qpn_ds = htobe32((devx_qp->qp.qp_num << 8) | 3); // ds:3, one ctrl seg + one rdata seg + one local data seg
+	devx_qp->cur_ctrl = ctrl; // used to ring doorbell
+
+	devx_qp->sq_cur_post++; // one sq WQE is at least MLX5_SEND_WQE_BB even though only use 48B
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x end move to next wqe slot at:%04d\n", qp->qp_num, devx_qp->sq_cur_post);
+}
+
 int mlx5dv_devx_ring_db(struct ibv_qp *qp)
 {
 	struct mlx5_context *mctx = to_mctx(qp->context);

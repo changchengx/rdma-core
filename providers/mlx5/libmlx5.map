@@ -27,6 +27,7 @@ MLX5_1.3 {
 		mlx5dv_wrap_devx_modify_qp_rtr2rts;
 		mlx5dv_wrap_devx_query_qp;
 		mlx5dv_devx_ring_db;
+		mlx5_devx_post_rdma_write;
 } MLX5_1.2;
 
 MLX5_1.4 {

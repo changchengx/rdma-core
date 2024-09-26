@@ -6940,6 +6940,32 @@ int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen)
 	return ret;
 }
 
+void mlx5_devx_post_rdma_write(struct ibv_qp*qp, uint32_t rkey, uint64_t remote_addr, uint32_t lkey, uint64_t local_addr, uint32_t length)
+{
+	struct mlx5_context *mctx = to_mctx(qp->context);
+	struct mlx5_devx_qp *devx_qp = (struct mlx5_devx_qp*)qp;
+
+	uint32_t idx = devx_qp->sq_wqebb_cnt_post & (devx_qp->sq_max_wqe_cnt * 4 - 1);
+	struct mlx5_wqe_ctrl_seg *ctrl = devx_qp->sq_wqe_start + (idx << MLX5_SEND_WQE_SHIFT) * 4;
+	memset(ctrl, 0, sizeof(*ctrl));
+
+	ctrl->opmod_idx_opcode = htobe32(((devx_qp->sq_wqebb_cnt_post & 0xffff) << 8) | MLX5_OPCODE_RDMA_WRITE);
+	ctrl->qpn_ds = htobe32(devx_qp->qp.qp_num << 8 | 3); // #TODO correct ds
+
+	struct mlx5_wqe_raddr_seg *rseg = (void*)(ctrl + 1);
+	rseg->raddr = htobe64(remote_addr);
+	rseg->rkey = htobe32(rkey);
+	rseg->reserved = 0;
+
+	struct mlx5_wqe_data_seg *dseg = (void*)(rseg + 1);
+	dseg->byte_count = htobe32(length);
+	dseg->lkey = htobe32(lkey);
+	dseg->addr = htobe64(local_addr);
+
+	devx_qp = (struct mlx5_devx_qp*)qp;
+	devx_qp->sq_wqebb_cnt_post++; // correct cnt_post
+}
+
 int mlx5dv_devx_ring_db(struct ibv_qp *qp)
 {
 	struct mlx5_context *mctx = to_mctx(qp->context);

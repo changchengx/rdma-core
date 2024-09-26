@@ -354,6 +354,7 @@ struct ibv_qp *mlx5dv_create_qp(struct ibv_context *context,
 int mlx5dv_wrap_devx_query_qp(struct ibv_qp *qp, void *out, size_t outlen);
 
 int mlx5dv_devx_ring_db(struct ibv_qp *qp);
+void mlx5_devx_post_rdma_write(struct ibv_qp*qp, uint32_t rkey, uint64_t remote_addr, uint32_t lkey, uint64_t local_addr, uint32_t length);
 
 struct ibv_qp *mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *qp_attr,

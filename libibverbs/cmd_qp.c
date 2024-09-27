@@ -42,7 +42,7 @@ enum {
 };
 
 
-static void set_qp(struct verbs_qp *vqp,
+void set_qp(struct verbs_qp *vqp,
 		   struct ibv_qp *qp_in,
 		   struct ibv_qp_init_attr_ex *attr_ex,
 		   struct verbs_xrcd *vxrcd)

@@ -654,10 +654,21 @@ enum mlx5_qp_flags {
 	MLX5_QP_FLAGS_DRAIN_SIGERR = 0x02,
 };
 
+struct devx_qp {
+	struct mlx5dv_devx_umem  *dbr_umem; // dbr umem
+
+	struct mlx5dv_devx_umem *wq_umem; //wq buf umem
+
+	struct mlx5dv_devx_obj *devx_obj;
+};
+
 struct mlx5_qp {
 	struct mlx5_resource            rsc; /* This struct must be first */
 	struct verbs_qp			verbs_qp;
 	struct mlx5dv_qp_ex		dv_qp;
+
+	struct devx_qp *devx_qp;
+
 	struct ibv_qp		       *ibv_qp;
 	struct mlx5_buf                 buf;
 	int                             max_inline_data;

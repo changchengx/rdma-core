@@ -2142,7 +2142,8 @@ enum {
 		 MLX5DV_QP_CREATE_DISABLE_SCATTER_TO_CQE |
 		 MLX5DV_QP_CREATE_ALLOW_SCATTER_TO_CQE |
 		 MLX5DV_QP_CREATE_PACKET_BASED_CREDIT_MODE |
-		 MLX5DV_QP_CREATE_SIG_PIPELINING),
+		 MLX5DV_QP_CREATE_SIG_PIPELINING |
+		 MLX5DV_QP_CREATE_RC_DEVX),
 };
 
 static int create_dct(struct ibv_context *context,
@@ -2292,6 +2293,99 @@ static void set_qp_operational_state(struct mlx5_qp *qp,
 	}
 }
 
+static int mlx5_devx_create_qp(struct ibv_context *context,
+				 struct ibv_qp_init_attr_ex *attr_ex,
+				 struct mlx5_create_qp *cmd,
+				 struct mlx5_qp *qp,
+				 struct mlx5_create_qp_ex_resp *resp)
+{
+	struct mlx5_context *mctx = to_mctx(context);
+
+	uint32_t out[DEVX_ST_SZ_DW(create_qp_out)] = {};
+	uint32_t in[DEVX_ST_SZ_DW(create_qp_in)] = {};
+	void *qpc;
+
+	// opcode: create qp
+	DEVX_SET(create_qp_in, in, opcode, MLX5_CMD_OP_CREATE_QP);
+
+	qpc = DEVX_ADDR_OF(create_qp_in, in, qpc);
+
+	// qp type: rc
+	DEVX_SET(qpc, qpc, st, MLX5_QPC_ST_RC);
+	DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
+
+	struct mlx5dv_obj dv_obj;
+
+	memset(&dv_obj, 0, sizeof(dv_obj));
+	struct mlx5dv_pd mlx5_pd = {};
+	dv_obj.pd.in = attr_ex->pd;
+	dv_obj.pd.out = &mlx5_pd;
+	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_PD)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get pd dv obj\n", __func__, __LINE__);
+		return EINVAL;
+	}
+	DEVX_SET(qpc, qpc, pd, mlx5_pd.pdn);
+
+	DEVX_SET(qpc, qpc, uar_page, cmd->bfreg_index);
+
+	DEVX_SET(qpc, qpc, rq_type, 0); // use reguar RQ(not SRQ, not zero size RQ))
+
+	memset(&dv_obj, 0, sizeof(dv_obj));
+	struct mlx5dv_cq mlx5_cq = {};
+	dv_obj.cq.in = attr_ex->send_cq;
+	dv_obj.cq.out = &mlx5_cq;
+	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_CQ)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get send_cq dv obj\n", __func__, __LINE__);
+		return EINVAL;
+	}
+	DEVX_SET(qpc, qpc, cqn_snd, mlx5_cq.cqn);
+
+	memset(&dv_obj, 0, sizeof(dv_obj));
+	memset(&mlx5_cq, 0, sizeof(mlx5_cq));
+	dv_obj.cq.in = attr_ex->recv_cq;
+	dv_obj.cq.out = &mlx5_cq;
+	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_CQ)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get recv_cq dv obj\n", __func__, __LINE__);
+		return EINVAL;
+	}
+	DEVX_SET(qpc, qpc, cqn_rcv, mlx5_cq.cqn);
+
+	DEVX_SET(qpc, qpc, log_sq_size, ilog32(cmd->sq_wqe_count - 1));
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "sq_wqe_cnt:%d, log2_sq_size:%d\n", cmd->sq_wqe_count, ilog32(cmd->sq_wqe_count - 1));
+
+	DEVX_SET(qpc, qpc, log_rq_size, ilog32(cmd->rq_wqe_count - 1));
+	DEVX_SET(qpc, qpc, log_rq_stride, cmd->rq_wqe_shift - 4); // Every RQ/WQE equals (16 * 2^log_rq_stride) Bytes
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "rq_wqe_cnt:%d, log2_rq_size:%d, RQWQEBB16_log2_rq_stride:%d\n",
+		cmd->rq_wqe_count, ilog32(cmd->rq_wqe_count - 1), cmd->rq_wqe_shift - 4);
+
+	DEVX_SET(create_qp_in, in, wq_umem_id, qp->devx_qp->wq_umem->umem_id);
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "rq_buf_len:0x%08x, sq_buf_offset:0x%08x, sq_buf_len:0x%08x, allocated:0x%08x\n",
+			cmd->rq_wqe_count * (1 << cmd->rq_wqe_shift), qp->sq.offset, cmd->sq_wqe_count * MLX5_SEND_WQE_BB, (uint32_t)(qp->buf.length));
+
+	DEVX_SET(qpc, qpc, cs_req, 0); // data is always scattered according to send WQE.scatter list
+	DEVX_SET(qpc, qpc, cs_res, 0); // data will always be scattered to the receive buffer
+
+	DEVX_SET64(qpc, qpc, dbr_addr, 0); //offset is 0 in the mem used to create db_umem
+	DEVX_SET(qpc, qpc, dbr_umem_id, qp->devx_qp->dbr_umem->umem_id);
+
+	qp->devx_qp->devx_obj = mlx5dv_devx_obj_create(context, in, sizeof(in), out, sizeof(out));
+	if (qp->devx_qp->devx_obj == NULL) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to create qp with devx, err_syndrome:0x%08x\n", __func__, __LINE__, err_syndrome);
+		return EINVAL;
+	}
+
+	struct ibv_qp *ibqp = qp->ibv_qp;
+	ibqp->handle = qp->devx_qp->devx_obj->handle;// How to set handle or avoid using this handle for the devx qp??
+	ibqp->qp_num = DEVX_GET(create_qp_out, out, qpn);
+	ibqp->context = context;
+	set_qp(&qp->verbs_qp, NULL, attr_ex, NULL);
+
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "create qp:0x%06x == 0x%06x with devx\n", qp->verbs_qp.qp.qp_num, ibqp->qp_num);
+
+	return 0;
+}
+
 static struct ibv_qp *create_qp(struct ibv_context *context,
 				struct ibv_qp_init_attr_ex *attr,
 				struct mlx5dv_qp_init_attr *mlx5_qp_attr)
@@ -2423,6 +2517,13 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 				qp->flags |= MLX5_QP_FLAGS_DRAIN_SIGERR;
 			}
 
+			if (mlx5_qp_attr->create_flags & MLX5DV_QP_CREATE_RC_DEVX) {
+				if (attr->qp_type != IBV_QPT_RC) {
+					mlx5_err(fp, "DEVX only support RC QP\n");
+					return NULL;
+				}
+				qp->devx_qp = calloc(1, sizeof(*qp->devx_qp));
+			}
 		}
 
 		if (attr->qp_type == IBV_QPT_DRIVER) {
@@ -2553,7 +2654,27 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 			mlx5_spinlock_init_pd(&qp->rq.lock, attr->pd))
 		goto err_free_qp_buf;
 
+	if (qp->devx_qp == NULL) {
+
 	qp->db = mlx5_alloc_dbrec(ctx, attr->pd, &qp->custom_db);
+
+	} else {
+
+	if (posix_memalign((void **)(&qp->db), 8, 8)) {
+		mlx5_err(fp, "%s:%04d: failed to allocate dbr memory\n", __func__, __LINE__);
+		return NULL;
+	} else {
+		qp->devx_qp->dbr_umem = mlx5dv_devx_umem_reg(context, qp->db, 8,
+					IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+		if (qp->devx_qp->dbr_umem == NULL) {
+			mlx5_err(fp, "%s:%04d: failed to allocate dbr memory\n", __func__, __LINE__);
+			return NULL;
+		}
+		memset(qp->db, 0, 2 * sizeof(__be32));
+	}
+
+	}
+
 	if (!qp->db) {
 		mlx5_dbg(fp, MLX5_DBG_QP, "\n");
 		goto err_free_qp_buf;
@@ -2610,12 +2731,34 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 		/* Create QP should start from ECE version 1 as a trigger */
 		cmd.ece_options = 0x10000000;
 
-	if (attr->comp_mask & MLX5_CREATE_QP_EX2_COMP_MASK)
+	if (qp->devx_qp) {
+
+	if (!bf || bf->dyn_alloc_uar != true) {
+		mlx5_err(fp, "%s:%04d: not support further op\n", __func__, __LINE__);
+		return NULL;
+	}
+
+	qp->devx_qp->wq_umem =
+		mlx5dv_devx_umem_reg(context, qp->buf.buf, qp->buf.length, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+	if (qp->devx_qp->wq_umem == NULL) {
+			mlx5_err(fp, "%s:%04d: failed to reg wq buf mem\n", __func__, __LINE__);
+			return NULL;
+	}
+
+	ret = mlx5_devx_create_qp(context, attr, &cmd, qp, &resp_ex);
+
+	} else {
+
+	if (attr->comp_mask & MLX5_CREATE_QP_EX2_COMP_MASK) {
 		ret = mlx5_cmd_create_qp_ex(context, attr, &cmd, qp, &resp_ex);
-	else
+	} else {
+		// go here;
 		ret = ibv_cmd_create_qp_ex(context, &qp->verbs_qp,
 					   attr, &cmd.ibv_cmd, sizeof(cmd),
 					   &resp.ibv_resp, sizeof(resp));
+	}
+
+	}
 	if (ret) {
 		mlx5_dbg(fp, MLX5_DBG_QP, "ret %d\n", ret);
 		goto err_free_uidx;

@@ -6981,8 +6981,8 @@ int mlx5dv_devx_ring_db(struct ibv_qp *qp)
 	}
 
 	udma_to_device_barrier();
-	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x ring db at:%04d\n", qp->qp_num, devx_qp->sq_cur_post & 0xffff);
-	devx_qp->db[MLX5_SND_DBR] = htobe32(devx_qp->sq_cur_post & 0xffff);
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x update dbr at:%04d\n", qp->qp_num, devx_qp->sq_cur_post & 0xffff);
+	devx_qp->dbr[MLX5_SND_DBR] = htobe32(devx_qp->sq_cur_post & 0xffff);
 	mmio_wc_start();
 
 	devx_qp->sq_pending_req = 0;
@@ -7077,7 +7077,8 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 		return NULL;
 	} else {
 		memset(wq_buf, 0, devx_qp->wq_buf_len);
-		wq_umem = mlx5dv_devx_umem_reg(context, wq_buf, devx_qp->wq_buf_len, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+		wq_umem = mlx5dv_devx_umem_reg(context, wq_buf, devx_qp->wq_buf_len,
+						IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 		if (wq_umem == NULL) {
 			mlx5_err(mctx->dbg_fp, "%s:%04d: failed to reg wq buf mem\n", __func__, __LINE__);
 			return NULL;
@@ -7094,21 +7095,22 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	DEVX_SET(qpc, qpc, cs_res, 0); // data will always be scattered to the receive buffer
 
 	struct mlx5dv_devx_umem *db_umem = NULL;
-	__be32 *db = NULL;
-	if (posix_memalign((void **)&db, 8, 8)) {
-		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to allocate db memory\n", __func__, __LINE__);
+	__be32 *dbr = NULL;
+	if (posix_memalign((void **)&dbr, 8, 8)) {
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to allocate dbr memory\n", __func__, __LINE__);
 		return NULL;
 	} else {
-		db_umem = mlx5dv_devx_umem_reg(context, db, 8, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+		db_umem = mlx5dv_devx_umem_reg(context, dbr, 8,
+						IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 		if (db_umem == NULL) {
-			mlx5_err(mctx->dbg_fp, "%s:%04d: failed to allocate db memory\n", __func__, __LINE__);
+			mlx5_err(mctx->dbg_fp, "%s:%04d: failed to allocate dbr memory\n", __func__, __LINE__);
 			return NULL;
 		}
 	}
 	DEVX_SET64(qpc, qpc, dbr_addr, 0);
 	DEVX_SET(qpc, qpc, dbr_umem_id, db_umem->umem_id);
 
-	devx_qp->db = db;
+	devx_qp->dbr = dbr;
 	devx_qp->db_umem = db_umem;
 
 	struct mlx5dv_devx_obj *devx_obj = mlx5dv_devx_obj_create(context, in, sizeof(in), out, sizeof(out));

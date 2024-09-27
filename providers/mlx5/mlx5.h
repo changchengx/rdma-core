@@ -745,7 +745,7 @@ struct mlx5_devx_qp {
 	uint32_t rq_head;
 	uint32_t rq_tail;
 
-	__be32 *db;
+	__be32 *dbr; // used to update doorbell record
 	struct mlx5dv_devx_umem  *db_umem;
 
 	struct mlx5dv_devx_obj *devx_obj;

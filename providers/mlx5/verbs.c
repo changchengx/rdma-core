@@ -6855,33 +6855,6 @@ ssize_t mlx5dv_devx_get_event(struct mlx5dv_devx_event_channel *event_channel,
 				      event_resp_len);
 }
 
-static uint32_t ceil_log2(uint32_t v)
-{
-	/* [0]    => 0 [1, 2] => 1
-	 * [3, 4] => 2 [5, 8] => 3
-	 */
-	static const uint32_t bits_arr[] = {0x2, 0xC, 0xF0, 0xFF00, 0xFFFF0000};
-	static const uint32_t shift_arr[] = {1, 2, 4, 8, 16};
-	int i;
-	uint32_t input_val = v;
-
-	if (v == 1) {
-		return 1;
-	}
-
-	uint32_t r = 0;/* result of log2(v) will go here */
-	for (i = 4; i >= 0; i--) {
-		if (v & bits_arr[i]) {
-			v >>= shift_arr[i];
-			r |= shift_arr[i];
-		}
-	}
-	/* Rounding up if required */
-	r += !!(input_val & ((1 << r) - 1));
-
-	return r;
-}
-
 static int mlx5dv_devx_qp_rst2init(struct mlx5_devx_qp *devx_qp)
 {
 	int ret;
@@ -7058,16 +7031,23 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	struct mlx5_qp fake_qp = {};
 	fake_qp.buf_size = mlx5_calc_wq_size(mctx, qp_attr, mlx5_qp_attr, &fake_qp);
 	devx_qp->sq_wqe_cnt = fake_qp.sq.wqe_cnt;
-	DEVX_SET(qpc, qpc, log_sq_size, ceil_log2(devx_qp->sq_wqe_cnt));
+	DEVX_SET(qpc, qpc, log_sq_size, ilog32(devx_qp->sq_wqe_cnt - 1));
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "sq_wqe_cnt:%d, log2_sq_size:%d\n",
+		devx_qp->sq_wqe_cnt, ilog32(devx_qp->sq_wqe_cnt - 1));
+
 	devx_qp->sq_wqe_shift = fake_qp.sq.wqe_shift;
+	int sq_offset = fake_qp.sq.offset;
 	int sq_buf_len = devx_qp->sq_wqe_cnt * (1 << devx_qp->sq_wqe_shift);
 	devx_qp->sq_max_gs = fake_qp.sq.max_gs;
 	devx_qp->sq_max_post = fake_qp.sq.max_post;
 
 	devx_qp->rq_wqe_cnt = fake_qp.rq.wqe_cnt;
-	DEVX_SET(qpc, qpc, log_rq_size, ceil_log2(devx_qp->rq_wqe_cnt));
+	DEVX_SET(qpc, qpc, log_rq_size, ilog32(devx_qp->rq_wqe_cnt - 1));
 	devx_qp->rq_wqe_shift = fake_qp.rq.wqe_shift;
-	DEVX_SET(qpc, qpc, log_rq_stride, ceil_log2((1 << devx_qp->rq_wqe_shift) >> 4)); // Every RQ/WQE equals (16 * 2^log_rq_stride) Bytes
+	DEVX_SET(qpc, qpc, log_rq_stride, devx_qp->rq_wqe_shift - 4); // Every RQ/WQE equals (16 * 2^log_rq_stride) Bytes
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "rq_wqe_cnt:%d, log2_rq_size:%d, RQWQEBB16_log2_rq_stride:%d\n",
+		devx_qp->rq_wqe_cnt, ilog32(devx_qp->rq_wqe_cnt - 1), devx_qp->rq_wqe_shift - 4);
+
 	devx_qp->rq_max_gs = fake_qp.rq.max_gs;
 	devx_qp->rq_max_post = fake_qp.rq.max_post;
 	int rq_buf_len = devx_qp->sq_wqe_cnt * MLX5_SEND_WQE_BB;
@@ -7092,7 +7072,9 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	devx_qp->wq_umem = wq_umem;
 
 	devx_qp->wq_rq_start = wq_buf;
-	devx_qp->wq_sq_start = wq_buf + rq_buf_len;
+	devx_qp->wq_sq_start = wq_buf + sq_offset;
+	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "rq_buf_len:0x%08x, sq_buf_offset:0x%08x, sq_buf_len:0x%08x\n",
+		rq_buf_len, fake_qp.sq.offset, sq_buf_len);
 
 	DEVX_SET(qpc, qpc, cs_req, 0); // data is always scattered according to send WQE.scatter list
 	DEVX_SET(qpc, qpc, cs_res, 0); // data will always be scattered to the receive buffer

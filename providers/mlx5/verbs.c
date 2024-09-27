@@ -6996,7 +6996,7 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_PD)) {
 		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get pd dv obj\n", __func__, __LINE__);
 		return NULL;
-	};
+	}
 	DEVX_SET(qpc, qpc, pd, mlx5_pd.pdn);
 
 	devx_qp->bf = mlx5_get_qp_uar(context); //TODO: use mlx5dv_devx_alloc_uar
@@ -7015,7 +7015,7 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_CQ)) {
 		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get send_cq dv obj\n", __func__, __LINE__);
 		return NULL;
-	};
+	}
 	DEVX_SET(qpc, qpc, cqn_snd, mlx5_cq.cqn);
 
 	memset(&dv_obj, 0, sizeof(dv_obj));
@@ -7025,7 +7025,7 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	if (mlx5dv_init_obj(&dv_obj, MLX5DV_OBJ_CQ)) {
 		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to get recv_cq dv obj\n", __func__, __LINE__);
 		return NULL;
-	};
+	}
 	DEVX_SET(qpc, qpc, cqn_rcv, mlx5_cq.cqn);
 
 	struct mlx5_qp fake_qp = {};
@@ -7050,7 +7050,7 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 
 	devx_qp->rq_max_gs = fake_qp.rq.max_gs;
 	devx_qp->rq_max_post = fake_qp.rq.max_post;
-	int rq_buf_len = devx_qp->sq_wqe_cnt * MLX5_SEND_WQE_BB;
+	int rq_buf_len = devx_qp->rq_wqe_cnt * (1 << devx_qp->rq_wqe_shift);
 	devx_qp->wq_buf_len = rq_buf_len + sq_buf_len;
 
 	struct mlx5dv_devx_umem *wq_umem = NULL;

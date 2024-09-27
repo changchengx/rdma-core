@@ -6965,6 +6965,7 @@ void mlx5_devx_post_rdma_write(struct ibv_qp* qp, uint32_t rkey, uint64_t remote
 	dseg->addr = htobe64(local_addr);
 
 	ctrl->qpn_ds = htobe32((devx_qp->qp.qp_num << 8) | 3); // ds:3, one ctrl seg + one rdata seg + one local data seg
+	devx_qp->cur_ctrl = ctrl;
 
 	devx_qp->sq_cur_post++; // one sq WQE is at least MLX5_SEND_WQE_BB even though only use 48B
 	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x end move to next wqe slot at:%04d\n", qp->qp_num, devx_qp->sq_cur_post);
@@ -6984,8 +6985,10 @@ int mlx5dv_devx_ring_db(struct ibv_qp *qp)
 	mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x update dbr at:%04d\n", qp->qp_num, devx_qp->sq_cur_post & 0xffff);
 	devx_qp->dbr[MLX5_SND_DBR] = htobe32(devx_qp->sq_cur_post & 0xffff);
 	mmio_wc_start();
+	mmio_write64_be(devx_qp->bf->reg + devx_qp->bf->offset, *(__be64*)(devx_qp->cur_ctrl));
 
 	devx_qp->sq_pending_req = 0;
+	mmio_flush_writes();
 
 	return 0;
 }
@@ -7023,12 +7026,12 @@ struct ibv_qp *_mlx5dv_wrap_devx_create_qp(struct ibv_context *context,
 	};
 	DEVX_SET(qpc, qpc, pd, mlx5_pd.pdn);
 
-	struct mlx5_bf *bf = mlx5_get_qp_uar(context); //TODO: use mlx5dv_devx_alloc_uar
-	if (!bf || bf->dyn_alloc_uar != true) {
+	devx_qp->bf = mlx5_get_qp_uar(context); //TODO: use mlx5dv_devx_alloc_uar
+	if (!devx_qp->bf || devx_qp->bf->dyn_alloc_uar != true) {
 		mlx5_err(mctx->dbg_fp, "%s:%04d: not support further op\n", __func__, __LINE__);
 		return NULL;
 	}
-	DEVX_SET(qpc, qpc, uar_page, bf->page_id);
+	DEVX_SET(qpc, qpc, uar_page, devx_qp->bf->page_id);
 
 	DEVX_SET(qpc, qpc, rq_type, 0); // use reguar RQ(not SRQ, not zero size RQ))
 

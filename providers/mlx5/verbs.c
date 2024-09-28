@@ -3118,6 +3118,41 @@ static int qp_enable_mmo(struct ibv_qp *qp)
 	return ret ? mlx5_get_cmd_status_err(ret, out) : 0;
 }
 
+static int devx_modify_qp_rtr2rts(struct mlx5_qp *mqp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	int ret;
+	struct mlx5_context *mctx = to_mctx(mqp->ibv_qp->context);
+
+	uint32_t out[DEVX_ST_SZ_DW(rtr2rts_qp_out)] = {};
+	uint32_t in[DEVX_ST_SZ_DW(rtr2rts_qp_in)] = {};
+
+	void *qpc;
+	qpc = DEVX_ADDR_OF(rtr2rts_qp_in, in, qpc);
+	DEVX_SET(rtr2rts_qp_in, in, opcode, MLX5_CMD_OP_RTR2RTS_QP);
+	DEVX_SET(rtr2rts_qp_in, in, qpn, mqp->ibv_qp->qp_num);
+
+	DEVX_SET(qpc, qpc, log_rra_max, 0); // Max 1(2^0) outstanding RDMA_READ or Atomic operation on the requetor.
+
+	DEVX_SET(qpc, qpc, retry_count, attr->retry_cnt);
+	DEVX_SET(qpc, qpc, rnr_retry, attr->rnr_retry);
+
+	DEVX_SET(qpc, qpc, primary_address_path.ack_timeout, attr->timeout);
+	DEVX_SET(qpc, qpc, primary_address_path.reserved_at_50, 0); // log_rtm = 0, No need to extend timeout
+
+	DEVX_SET(qpc, qpc, log_ack_req_freq, 0); // UCX default 8
+
+	ret = mlx5dv_devx_obj_modify(mqp->devx_qp->devx_obj, in, sizeof(in), out, sizeof(out));
+	if (ret != 0) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to modify qp:0x%06x rtr2rts with devx, err_syndrome:0x%08x\n",
+		         __func__, __LINE__, mqp->ibv_qp->qp_num, err_syndrome);
+	} else {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "success qp:0x%06x rtr2rts\n", mqp->ibv_qp->qp_num);
+	}
+
+	return ret;
+}
+
 static int devx_modify_qp_init2rtr(struct mlx5_qp *mqp, struct ibv_qp_attr *attr, int attr_mask)
 {
 	int ret;
@@ -3222,6 +3257,9 @@ int devx_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
 		break;
 	case IBV_QPS_RTR:
 		ret = devx_modify_qp_init2rtr(mqp, attr, attr_mask);
+		break;
+	case IBV_QPS_RTS:
+		ret = devx_modify_qp_rtr2rts(mqp, attr, attr_mask);
 		break;
 	default:
 		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "failed to change qp:0x%06x to be:%d state\n", qp->qp_num, attr->qp_state);

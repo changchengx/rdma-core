@@ -3118,6 +3118,62 @@ static int qp_enable_mmo(struct ibv_qp *qp)
 	return ret ? mlx5_get_cmd_status_err(ret, out) : 0;
 }
 
+static int devx_modify_qp_rst2init(struct mlx5_qp *mqp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	int ret;
+	struct mlx5_context	*mctx = to_mctx(mqp->ibv_qp->context);
+
+	if (mqp->ibv_qp->state == IBV_QPS_INIT) {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "qp:0x%06x already in init state, return directly\n", mqp->ibv_qp->qp_num);
+		return 0;
+	}
+
+	uint32_t in[DEVX_ST_SZ_DW(rst2init_qp_in)] = {};
+	uint32_t out[DEVX_ST_SZ_DW(rst2init_qp_out)] = {};
+
+	DEVX_SET(rst2init_qp_in, in, opcode, MLX5_CMD_OP_RST2INIT_QP);
+	DEVX_SET(rst2init_qp_in, in, qpn, mqp->ibv_qp->qp_num);
+
+	void *qpc = DEVX_ADDR_OF(rst2init_qp_in, in, qpc);
+	DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
+	DEVX_SET(qpc, qpc, primary_address_path.vhca_port_num, 1); // always fix to fi/1st port.
+
+	DEVX_SET(qpc, qpc, rwe, 1); // enable remote RDMA WRITE operation.
+	DEVX_SET(qpc, qpc, rre, 1); // enable remote RDMA READ operation.
+
+	ret = mlx5dv_devx_obj_modify(mqp->devx_qp->devx_obj, in, sizeof(in), out, sizeof(out));
+	if (ret != 0) {
+		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
+		mlx5_err(mctx->dbg_fp, "%s:%04d: failed to modify qp:0x%06x rst2init with devx, err_syndrome:0x%08x\n",
+		         __func__, __LINE__, mqp->ibv_qp->qp_num, err_syndrome);
+	} else {
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "success qp:0x%06x rst2init\n", mqp->ibv_qp->qp_num);
+	}
+
+	return ret;
+}
+
+static
+int devx_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
+{
+	int ret;
+	struct mlx5_qp *mqp = to_mqp(qp);
+	struct mlx5_context	*mctx = to_mctx(qp->context);
+
+	switch(attr->qp_state) {
+	case IBV_QPS_INIT:
+		ret = devx_modify_qp_rst2init(mqp, attr, attr_mask);
+		break;
+	default:
+		mlx5_dbg(mctx->dbg_fp, MLX5_DBG_QP, "failed to change qp:0x%06x to be:%d state\n", qp->qp_num, attr->qp_state);
+		ret = EOPNOTSUPP;
+	}
+
+	if (!ret) set_qp_operational_state(mqp, attr->qp_state);
+
+	return ret;
+}
+
 int mlx5_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 		   int attr_mask)
 {
@@ -3131,6 +3187,9 @@ int mlx5_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 
 	if (mqp->dc_type == MLX5DV_DCTYPE_DCT)
 		return modify_dct(qp, attr, attr_mask);
+
+	if (mqp->devx_qp)
+		return devx_modify_qp(qp, attr, attr_mask);
 
 	if (mqp->rss_qp)
 		return EOPNOTSUPP;

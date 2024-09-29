@@ -664,6 +664,11 @@ struct devx_qp {
 	struct mlx5dv_devx_obj *devx_obj;
 };
 
+struct mlx5_wq_recv_send_enable {
+   unsigned            head_en_index;
+   unsigned            head_en_count;
+};
+
 struct mlx5_qp {
 	struct mlx5_resource            rsc; /* This struct must be first */
 	struct verbs_qp			verbs_qp;
@@ -729,6 +734,10 @@ struct mlx5_qp {
 	 * write to the set_ece will clear this field.
 	 */
 	uint32_t			get_ece;
+
+	/* recv-send enable hot data */
+	struct mlx5_wq_recv_send_enable rq_enable;
+	struct mlx5_wq_recv_send_enable sq_enable;
 
 	uint8_t				need_mmo_enable:1;
 	uint8_t				need_devx_qp:1;

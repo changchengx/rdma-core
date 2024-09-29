@@ -61,6 +61,8 @@ static const uint32_t mlx5_ib_opcode[] = {
 	[IBV_WR_TSO]			= MLX5_OPCODE_TSO,
 	[IBV_WR_DRIVER1]		= MLX5_OPCODE_UMR,
 	[IBV_WR_CQE_WAIT]		= MLX5_OPCODE_CQE_WAIT,
+	[IBV_WR_RECV_ENABLE]		= MLX5_OPCODE_RECV_ENABLE,
+	[IBV_WR_SEND_ENABLE]		= MLX5_OPCODE_SEND_ENABLE,
 };
 
 static inline void set_wait_en_seg(void *wqe_seg, uint32_t obj_num, uint32_t count)
@@ -999,6 +1001,62 @@ static inline int _mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 				}
 				break;
 
+			case IBV_WR_SEND_ENABLE:
+			case IBV_WR_RECV_ENABLE:
+				{
+					unsigned head_en_index;
+					struct mlx5_wq *wq;
+					struct mlx5_wq_recv_send_enable *wq_en;
+
+					/*
+					* Posting work request for QP that does not support
+					* SEND/RECV ENABLE makes performance worse.
+					*/
+					// if (((wr->opcode == IBV_WR_SEND_ENABLE) &&
+					// 	!(to_mqp(wr->wr.wqe_enable.qp)->gen_data.create_flags &
+					// 		IBV_QP_CREATE_MANAGED_SEND)) ||
+					// 	((wr->opcode == IBV_WR_RECV_ENABLE) &&
+					// 	!(to_mqp(wr->wr.wqe_enable.qp)->gen_data.create_flags &
+					// 		IBV_QP_CREATE_MANAGED_RECV))) {
+					// 	return EINVAL;
+					// }
+
+					wq = (wr->opcode == IBV_WR_SEND_ENABLE) ?
+						&to_mqp(wr->wr.wqe_enable.qp)->sq :
+						&to_mqp(wr->wr.wqe_enable.qp)->rq;
+
+					wq_en = (wr->opcode == IBV_WR_SEND_ENABLE) ?
+						&to_mqp(wr->wr.wqe_enable.qp)->sq_enable :
+						&to_mqp(wr->wr.wqe_enable.qp)->rq_enable;
+
+					/* If wqe_count is 0 release all WRs from queue */
+					if (wr->wr.wqe_enable.wqe_count) {
+						head_en_index = wq_en->head_en_index +
+									wr->wr.wqe_enable.wqe_count;
+						wq_en->head_en_count =
+							wq_en->head_en_count >= wr->wr.wqe_enable.wqe_count ?
+							wq_en->head_en_count : wr->wr.wqe_enable.wqe_count;
+
+						if ((int)(wq->head - head_en_index) < 0)
+							return EINVAL;
+					} else {
+						head_en_index = wq->head;
+						wq_en->head_en_count = wq->head - wq_en->head_en_index;
+					}
+
+					if (wr->send_flags & IBV_SEND_WAIT_EN_LAST) {
+						wq_en->head_en_index += wq_en->head_en_count;
+						wq_en->head_en_count = 0;
+					}
+
+					set_wait_en_seg(seg,
+							wr->wr.wqe_enable.qp->qp_num,
+							head_en_index);
+
+					seg   += sizeof(struct mlx5_wqe_wait_en_seg);
+					size += sizeof(struct mlx5_wqe_wait_en_seg) / 16;
+				}
+				break;
 			default:
 				break;
 			}

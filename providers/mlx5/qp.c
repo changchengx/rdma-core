@@ -871,7 +871,8 @@ static inline int _mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 			goto out;
 		}
 
-		if (unlikely(mlx5_wq_overflow(&qp->sq, nreq,
+		if (unlikely(!(qp->flags & MLX5_QP_FLAGS_IGNORE_SQ_OVERFLOW) &&
+			mlx5_wq_overflow(&qp->sq, nreq,
 					      to_mcq(qp->ibv_qp->send_cq)))) {
 			mlx5_dbg(fp, MLX5_DBG_QP_SEND, "work queue overflow\n");
 			err = ENOMEM;
@@ -1402,7 +1403,8 @@ static inline void _common_wqe_init_op(struct ibv_qp_ex *ibqp, int ib_op,
 	uint8_t fence;
 	uint32_t idx;
 
-	if (unlikely(mlx5_wq_overflow(&mqp->sq, mqp->nreq, to_mcq(ibqp->qp_base.send_cq)))) {
+	if (unlikely(!(mqp->flags & MLX5_QP_FLAGS_IGNORE_SQ_OVERFLOW) &&
+		mlx5_wq_overflow(&mqp->sq, mqp->nreq, to_mcq(ibqp->qp_base.send_cq)))) {
 		FILE *fp = to_mctx(((struct ibv_qp *)ibqp)->context)->dbg_fp;
 
 		mlx5_dbg(fp, MLX5_DBG_QP_SEND, "Work queue overflow\n");
@@ -3509,7 +3511,8 @@ static inline void raw_wqe_init(struct ibv_qp_ex *ibqp)
 	struct mlx5_qp *mqp = to_mqp((struct ibv_qp *)ibqp);
 	uint32_t idx;
 
-	if (unlikely(mlx5_wq_overflow(&mqp->sq, mqp->nreq,
+	if (unlikely(!(mqp->flags & MLX5_QP_FLAGS_IGNORE_SQ_OVERFLOW) &&
+		mlx5_wq_overflow(&mqp->sq, mqp->nreq,
 				      to_mcq(ibqp->qp_base.send_cq)))) {
 		FILE *fp = to_mctx(((struct ibv_qp *)ibqp)->context)->dbg_fp;
 
@@ -3994,7 +3997,8 @@ int mlx5_post_recv(struct ibv_qp *ibqp, struct ibv_recv_wr *wr,
 	ind = qp->rq.head & (qp->rq.wqe_cnt - 1);
 
 	for (nreq = 0; wr; ++nreq, wr = wr->next) {
-		if (unlikely(mlx5_wq_overflow(&qp->rq, nreq,
+		if (unlikely(!(qp->flags & MLX5_QP_FLAGS_IGNORE_RQ_OVERFLOW) &&
+			mlx5_wq_overflow(&qp->rq, nreq,
 					      to_mcq(qp->ibv_qp->recv_cq)))) {
 			err = ENOMEM;
 			*bad_wr = wr;

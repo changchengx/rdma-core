@@ -2368,6 +2368,18 @@ static int mlx5_devx_create_qp(struct ibv_context *context,
 	DEVX_SET64(qpc, qpc, dbr_addr, 0); //offset is 0 in the mem used to create db_umem
 	DEVX_SET(qpc, qpc, dbr_umem_id, qp->devx_qp->dbr_umem->umem_id);
 
+	if (qp->need_cd_master) {
+		DEVX_SET64(qpc, qpc, cd_master, 1); //1: Core Direct WQEs are supported on the send queue
+	}
+
+	if (qp->need_cd_slave_send) {
+		DEVX_SET64(qpc, qpc, cd_slave_send, 1); //1: Core Direct WQE processing mode is enabled on the send queue of this QP
+	}
+
+	if (qp->need_cd_slave_recv) {
+		DEVX_SET64(qpc, qpc, cd_slave_receive, 1); //1: Core Direct WQE processing mode is enabled on the receive queue of this QP
+	}
+
 	qp->devx_qp->devx_obj = mlx5dv_devx_obj_create(context, in, sizeof(in), out, sizeof(out));
 	if (qp->devx_qp->devx_obj == NULL) {
 		uint32_t err_syndrome = DEVX_GET(general_obj_out_cmd_hdr, out, syndrome);
@@ -2429,6 +2441,22 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 
 	ibqp = &qp->verbs_qp.qp;
 	qp->ibv_qp = ibqp;
+
+	if (attr->comp_mask & IBV_QP_INIT_ATTR_CREATE_FLAGS) {
+		if (attr->create_flags & IBV_QP_CREATE_CROSS_CHANNEL) {
+			qp->need_cd_master = 1;
+			attr->create_flags &= ~IBV_QP_CREATE_CROSS_CHANNEL;
+		}
+		if (attr->create_flags & IBV_QP_CREATE_MANAGED_SEND) {
+			qp->need_cd_slave_send = 1;
+			attr->create_flags &= ~IBV_QP_CREATE_MANAGED_SEND;
+		}
+		if (attr->create_flags & IBV_QP_CREATE_MANAGED_RECV) {
+			qp->need_cd_slave_recv = 1;
+			attr->create_flags &= ~IBV_QP_CREATE_MANAGED_RECV;
+		}
+		qp->need_devx_qp = qp->need_cd_master | qp->need_cd_slave_send | qp->need_cd_slave_recv;
+	}
 
 	if ((attr->comp_mask & IBV_QP_INIT_ATTR_CREATE_FLAGS) &&
 		(attr->create_flags & IBV_QP_CREATE_SOURCE_QPN)) {

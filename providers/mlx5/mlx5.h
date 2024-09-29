@@ -730,6 +730,9 @@ struct mlx5_qp {
 
 	uint8_t				need_mmo_enable:1;
 	uint8_t				need_devx_qp:1;
+	uint8_t				need_cd_slave_recv:1;
+	uint8_t				need_cd_slave_send:1;
+	uint8_t				need_cd_master:1;
 };
 
 struct mlx5_devx_qp {

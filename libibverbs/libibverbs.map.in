@@ -187,6 +187,7 @@ IBVERBS_PRIVATE_@IBVERBS_PABI_VERSION@ {
 		ibv_cmd_create_cq_ex2;
 		ibv_cmd_create_flow;
 		ibv_cmd_create_flow_action_esp;
+		set_qp;
 		ibv_cmd_create_qp;
 		ibv_cmd_create_qp_ex2;
 		ibv_cmd_create_qp_ex;

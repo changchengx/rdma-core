@@ -2522,7 +2522,7 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 					mlx5_err(fp, "DEVX only support RC QP\n");
 					return NULL;
 				}
-				qp->devx_qp = calloc(1, sizeof(*qp->devx_qp));
+				qp->need_devx_qp = 1;
 			}
 		}
 
@@ -2565,6 +2565,14 @@ static struct ibv_qp *create_qp(struct ibv_context *context,
 	} else {
 		if (attr->qp_type == IBV_QPT_DRIVER)
 			goto err;
+	}
+
+	if (qp->need_devx_qp) {
+		qp->devx_qp = calloc(1, sizeof(*qp->devx_qp));
+		if (qp->devx_qp == NULL) {
+			mlx5_err(fp, "failed allocate memory for devx qp\n");
+			return NULL;
+		}
 	}
 
 	if (attr->comp_mask & IBV_QP_INIT_ATTR_RX_HASH) {

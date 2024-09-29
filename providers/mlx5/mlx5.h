@@ -729,6 +729,7 @@ struct mlx5_qp {
 	uint32_t			get_ece;
 
 	uint8_t				need_mmo_enable:1;
+	uint8_t				need_devx_qp:1;
 };
 
 struct mlx5_devx_qp {

@@ -62,6 +62,32 @@ static const uint32_t mlx5_ib_opcode[] = {
 	[IBV_WR_DRIVER1]		= MLX5_OPCODE_UMR,
 };
 
+static inline void set_vector_calc_seg(void *wqe_seg, struct ibv_send_wr *wr)
+{
+	struct mlx5_vector_calc_seg *seg = (struct mlx5_vector_calc_seg *)wqe_seg;
+
+	seg->op = htobe32((wr->vector_calc.op & 0xff) << 24);
+
+	uint32_t options = 0;
+	if (wr->vector_calc.tag_exist) {
+		options = ((wr->vector_calc.tag_size & 0x3) << 30) |
+			((wr->vector_calc.tag_type & 0x3) << 28) | (1 << 21);
+	}
+
+	options |= ((wr->vector_calc.operand_size & 0x3) << 26) |
+		((wr->vector_calc.operand_type & 0x3) << 24) |
+		((wr->vector_calc.little_endian ? 1 : 0) << 22) |
+		((wr->vector_calc.chunk_size & 0x7) << 16) |
+		(wr->vector_calc.vector_count & 0xff);
+
+	seg->options = htobe32(options);
+
+	// What's calc_matrix? Not support until now
+	seg->matrix_lkey = 0;
+	seg->matrix_laddr = 0;
+	return;
+}
+
 static void *get_recv_wqe(struct mlx5_qp *qp, int n)
 {
 	return qp->buf.buf + qp->rq.offset + (n << qp->rq.wqe_shift);
@@ -949,6 +975,43 @@ static inline int _mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 
 			default:
 				break;
+			}
+
+			if (wr->send_flags & IBV_SEND_VECTOR_CALC) {
+				switch (wr->opcode) {
+				case IBV_WR_RDMA_WRITE:
+				case IBV_WR_RDMA_WRITE_WITH_IMM:
+				case IBV_WR_SEND:
+				case IBV_WR_SEND_WITH_IMM:
+				case IBV_WR_SEND_WITH_INV:
+					if (wr->send_flags & IBV_SEND_INLINE) {
+						mlx5_dbg(fp, MLX5_DBG_QP_SEND, "IBV_SEND_VECTOR_CALC not support "
+							"IBV_SEDN_INLINE for wr opcode: %d\n", wr->opcode);
+						err = EOPNOTSUPP;
+						*bad_wr = wr;
+						goto out;
+					} else if (wr->num_sge != 1) {
+						mlx5_dbg(fp, MLX5_DBG_QP_SEND, "IBV_SEND_VECTOR_CALC not support "
+							"multiple sges:%d\n", wr->num_sge);
+						err = EOPNOTSUPP;
+						*bad_wr = wr;
+						goto out;
+					}
+
+					opmod = 0xff; // vector_cal opcode_modifier is 0xff
+					set_vector_calc_seg(seg, wr);
+					seg += sizeof(struct mlx5_vector_calc_seg);
+					size += sizeof(struct mlx5_vector_calc_seg) / 16;
+					break;
+
+				default:
+					mlx5_dbg(fp, MLX5_DBG_QP_SEND, "IBV_SEND_VECTOR_CALC not support ibv "
+						"sq wr opcode:%d\n", wr->opcode);
+					err = EOPNOTSUPP;
+					*bad_wr = wr;
+					goto out;
+					break;
+				}
 			}
 			break;
 
@@ -3458,7 +3521,8 @@ enum {
 		IBV_QP_EX_WITH_ATOMIC_CMP_AND_SWP |
 		IBV_QP_EX_WITH_ATOMIC_FETCH_AND_ADD |
 		IBV_QP_EX_WITH_LOCAL_INV |
-		IBV_QP_EX_WITH_BIND_MW,
+		IBV_QP_EX_WITH_BIND_MW |
+		IBV_QP_EX_WITH_VECTOR_CALC,
 	MLX5_SUPPORTED_SEND_OPS_FLAGS_XRC =
 		MLX5_SUPPORTED_SEND_OPS_FLAGS_RC,
 	MLX5_SUPPORTED_SEND_OPS_FLAGS_DCI =

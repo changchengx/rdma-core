@@ -1500,6 +1500,11 @@ static int _sq_overhead(struct mlx5_qp *qp,
 		rdma_size = sizeof(struct mlx5_wqe_ctrl_seg) +
 			    sizeof(struct mlx5_wqe_raddr_seg);
 
+	if (ops & (IBV_QP_EX_WITH_VECTOR_CALC)) {
+		rdma_size = rdma_size ? rdma_size + sizeof(struct mlx5_vector_calc_seg) :
+			sizeof(struct mlx5_wqe_ctrl_seg) + sizeof(struct mlx5_vector_calc_seg);
+	}
+
 	if (ops & (IBV_QP_EX_WITH_ATOMIC_CMP_AND_SWP |
 		   IBV_QP_EX_WITH_ATOMIC_FETCH_AND_ADD))
 		atomic_size = sizeof(struct mlx5_wqe_ctrl_seg) +

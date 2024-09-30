@@ -961,6 +961,7 @@ enum ibv_qp_create_send_ops_flags {
 	IBV_QP_EX_WITH_TSO			= 1 << 10,
 	IBV_QP_EX_WITH_FLUSH			= 1 << 11,
 	IBV_QP_EX_WITH_ATOMIC_WRITE		= 1 << 12,
+	IBV_QP_EX_WITH_VECTOR_CALC		= 1 << 13,
 };
 
 struct ibv_rx_hash_conf {
@@ -1127,7 +1128,8 @@ enum ibv_send_flags {
 	IBV_SEND_SIGNALED	= 1 << 1,
 	IBV_SEND_SOLICITED	= 1 << 2,
 	IBV_SEND_INLINE		= 1 << 3,
-	IBV_SEND_IP_CSUM	= 1 << 4
+	IBV_SEND_IP_CSUM	= 1 << 4,
+	IBV_SEND_VECTOR_CALC = 1 << (0x10 + 3)
 };
 
 enum ibv_placement_type {
@@ -1149,6 +1151,28 @@ struct ibv_sge {
 	uint64_t		addr;
 	uint32_t		length;
 	uint32_t		lkey;
+};
+
+enum ibv_calc_op {
+	IBV_CALC_OP_NA = 0,
+	IBV_CALC_OP_ADD	= 1,
+	IBV_CALC_OP_MAX,
+	IBV_CALC_OP_BAND,
+	IBV_CALC_OP_BOR,
+	IBV_CALC_OP_BXOR,
+	IBV_CALC_OP_MIN,
+	IBV_CALC_OP_SWAP_ENDIAN
+};
+
+enum ibv_calc_operand_type {
+	IBV_CALC_OPERAND_TYPE_UINT = 0,
+	IBV_CALC_OPERAND_TYPE_INT,
+	IBV_CALC_OPERAND_TYPE_FLOAT
+};
+
+enum ibv_calc_operand_size {
+	IBV_CALC_OPERAND_SIZE_32_BIT	= 0,
+	IBV_CALC_OPERAND_SIZE_64_BIT	= 1
 };
 
 struct ibv_send_wr {
@@ -1187,6 +1211,20 @@ struct ibv_send_wr {
 			uint32_t    remote_srqn;
 		} xrc;
 	} qp_type;
+	struct {
+		enum ibv_calc_op op;
+		enum ibv_calc_operand_type operand_type;
+		enum ibv_calc_operand_size operand_size;
+		uint8_t tag_type;
+		uint8_t tag_size;
+		uint8_t tag_exist;
+		uint8_t little_endian;
+		uint8_t vector_count;
+		uint16_t chunk_size;
+		uint32_t vector_size;
+		uint32_t vector_lkey;
+		uint64_t vector_laddr;
+	} vector_calc;
 	union {
 		struct {
 			struct ibv_mw	*mw;

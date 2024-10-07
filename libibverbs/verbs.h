@@ -1120,6 +1120,8 @@ enum ibv_wr_opcode {
 	IBV_WR_FLUSH = 14,
 	IBV_WR_ATOMIC_WRITE = 15,
 	IBV_WR_CQE_WAIT = 18,
+	IBV_WR_RECV_ENABLE = 19,
+	IBV_WR_SEND_ENABLE = 20,
 };
 
 const char *ibv_wr_opcode_str(enum ibv_wr_opcode opcode);
@@ -1211,6 +1213,10 @@ struct ibv_send_wr {
 			struct ibv_cq	*cq;
 			int32_t  cq_count;
 		} cqe_wait;
+		struct {
+			struct ibv_qp	*qp;
+			int32_t  wqe_count;
+		} wqe_enable;
 	} wr;
 	union {
 		struct {

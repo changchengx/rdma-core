@@ -1043,6 +1043,10 @@ static struct ibv_cq_ex *create_cq(struct ibv_context *context,
 	resp_drv = &resp_ex.drv_payload;
 	cq->cons_index = 0;
 
+	/* wait_index should start at value before 0 */
+	cq->wait_index = (uint32_t)(-1);
+	cq->wait_count = 0;
+
 	if (mlx5_spinlock_init(&cq->lock, !mlx5_single_threaded))
 		goto err;
 

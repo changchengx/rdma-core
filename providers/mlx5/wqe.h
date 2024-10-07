@@ -124,6 +124,12 @@ struct mlx5_wqe_inline_seg {
 	__be32		byte_count;
 };
 
+struct mlx5_wqe_wait_en_seg {
+	uint8_t		rsvd0[8];
+	uint32_t	pi;
+	uint32_t	obj_num;
+};
+
 struct mlx5_vector_calc_seg {
 	uint32_t op;
 	uint32_t rsvd1[2];

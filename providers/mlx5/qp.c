@@ -60,7 +60,18 @@ static const uint32_t mlx5_ib_opcode[] = {
 	[IBV_WR_LOCAL_INV]		= MLX5_OPCODE_UMR,
 	[IBV_WR_TSO]			= MLX5_OPCODE_TSO,
 	[IBV_WR_DRIVER1]		= MLX5_OPCODE_UMR,
+	[IBV_WR_CQE_WAIT]		= MLX5_OPCODE_CQE_WAIT,
 };
+
+static inline void set_wait_en_seg(void *wqe_seg, uint32_t obj_num, uint32_t count)
+{
+	struct mlx5_wqe_wait_en_seg *seg = (struct mlx5_wqe_wait_en_seg *)wqe_seg;
+
+	seg->pi      = htobe32(count);
+	seg->obj_num = htobe32(obj_num);
+
+	return;
+}
 
 static inline void set_vector_calc_seg(void *wqe_seg, struct ibv_send_wr *wr)
 {
@@ -970,6 +981,26 @@ static inline int _mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 				}
 
 				qp->sq.wr_data[idx] = IBV_WC_LOCAL_INV;
+				break;
+			}
+
+			case IBV_WR_CQE_WAIT: {
+				struct mlx5_cq *wait_cq = to_mcq(wr->wr.cqe_wait.cq);
+				uint32_t wait_index = 0;
+
+				wait_index = wait_cq->wait_index + wr->wr.cqe_wait.cq_count;
+				wait_cq->wait_count =
+						wait_cq->wait_count > wr->wr.cqe_wait.cq_count?
+						wait_cq->wait_count : wr->wr.cqe_wait.cq_count;
+
+				if (wr->send_flags & IBV_SEND_WAIT_EN_LAST) {
+					wait_cq->wait_index += wait_cq->wait_count;
+					wait_cq->wait_count = 0;
+				}
+
+				set_wait_en_seg(seg, wait_cq->cqn, wait_index);
+				seg += sizeof(struct mlx5_wqe_wait_en_seg);
+				size += sizeof(struct mlx5_wqe_wait_en_seg) / 16;
 				break;
 			}
 

@@ -1119,6 +1119,7 @@ enum ibv_wr_opcode {
 	IBV_WR_DRIVER1,
 	IBV_WR_FLUSH = 14,
 	IBV_WR_ATOMIC_WRITE = 15,
+	IBV_WR_CQE_WAIT = 18,
 };
 
 const char *ibv_wr_opcode_str(enum ibv_wr_opcode opcode);
@@ -1129,6 +1130,7 @@ enum ibv_send_flags {
 	IBV_SEND_SOLICITED	= 1 << 2,
 	IBV_SEND_INLINE		= 1 << 3,
 	IBV_SEND_IP_CSUM	= 1 << 4,
+	IBV_SEND_WAIT_EN_LAST = 1 << (0x10 + 2),
 	IBV_SEND_VECTOR_CALC = 1 << (0x10 + 3)
 };
 
@@ -1205,6 +1207,10 @@ struct ibv_send_wr {
 			uint32_t	remote_qpn;
 			uint32_t	remote_qkey;
 		} ud;
+		struct {
+			struct ibv_cq	*cq;
+			int32_t  cq_count;
+		} cqe_wait;
 	} wr;
 	union {
 		struct {

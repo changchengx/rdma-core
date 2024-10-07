@@ -499,6 +499,8 @@ struct mlx5_cq {
 	struct mlx5_spinlock		lock;
 	uint32_t			cqn;
 	uint32_t			cons_index;
+	uint32_t                        wait_index;
+	uint32_t                        wait_count;
 	__be32			       *dbrec;
 	bool				custom_db;
 	int				arm_sn;

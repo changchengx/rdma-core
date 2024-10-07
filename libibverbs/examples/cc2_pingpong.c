@@ -653,7 +653,7 @@ out:
 	return rem_dest;
 }
 
-void fill_buffer(struct pingpong_context *ctx,
+static void fill_buffer(struct pingpong_context *ctx,
 				enum ibv_calc_operand_type calc_data_type, enum ibv_calc_operand_size calc_data_size,
 				void* net_buf, int buff_size)
 {
@@ -685,7 +685,7 @@ void fill_buffer(struct pingpong_context *ctx,
 	}
 }
 
-void dump_buffer(struct pingpong_context *ctx,
+static void dump_buffer(struct pingpong_context *ctx,
 				enum ibv_calc_operand_type calc_data_type, enum ibv_calc_operand_size calc_data_size,
 				void* net_buf, int buff_size)
 {
@@ -697,7 +697,7 @@ void dump_buffer(struct pingpong_context *ctx,
 			for (int i=0; i<buff_size/sizeof(send_buf[0]); i++) {
 				printf("0x%08x(%f) ", send_buf[i], send_buf_float[i]);
 				if ((i%8)==7) {
-					printf("\n(0x%08x): ", (i+1)*sizeof(send_buf[0]));
+					printf("\n(0x%08lx): ", (i+1)*sizeof(send_buf[0]));
 				}
 			}
 			printf("\n");
@@ -707,7 +707,7 @@ void dump_buffer(struct pingpong_context *ctx,
 			for (int i=0; i<buff_size/sizeof(send_buf[0]); i++) {
 				printf("0x%016lx(%lf) ", send_buf[i], send_buf_double[i]);
 				if ((i%4)==3) {
-					printf("\n(0x%08x): ", (i+1)*sizeof(send_buf[0]));
+					printf("\n(0x%08lx): ", (i+1)*sizeof(send_buf[0]));
 				}
 			}
 			printf("\n");
@@ -719,7 +719,7 @@ void dump_buffer(struct pingpong_context *ctx,
 			for (int i=0; i<buff_size/sizeof(send_buf[0]); i++) {
 				printf("0x%08x ", send_buf[i]);
 				if ((i%8)==7) {
-					printf("\n(0x%08x): ", (i+1)*sizeof(send_buf[0]));
+					printf("\n(0x%08lx): ", (i+1)*sizeof(send_buf[0]));
 				}
 			}
 			printf("\n");
@@ -728,7 +728,7 @@ void dump_buffer(struct pingpong_context *ctx,
 			for (int i=0; i<buff_size/sizeof(send_buf[0]); i++) {
 				printf("0x%016lx ", send_buf[i]);
 				if ((i%4)==3) {
-					printf("\n(0x%08x): ", (i+1)*sizeof(send_buf[0]));
+					printf("\n(0x%08lx): ", (i+1)*sizeof(send_buf[0]));
 				}
 			}
 			printf("\n");
@@ -1574,7 +1574,7 @@ int parser(struct perftest_parameters *user_param1, int argc, char *argv[]) {
 	int use_event = 0;
 	//int rcnt, scnt;
 	int sl = 0;
-	int mqe_poll = 0, mqe_qp_enable = 0;
+	int mqe_poll = 0;
 	int verbose = 0;
 	int verify = 0;
 
@@ -1742,7 +1742,7 @@ int parser(struct perftest_parameters *user_param1, int argc, char *argv[]) {
 	user_param1->use_event = use_event;
 #if defined(CALC_SUPPORT)
 	user_param1->verbose = verbose;
-	user_param1->verify = verbose;
+	user_param1->verify = verify;
 	user_param1->calc_data_type = calc_data_type;
 	user_param1->calc_data_size = calc_data_size;
 	// user_param1->calc_operands_str = calc_operands_str;

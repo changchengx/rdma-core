@@ -2966,7 +2966,25 @@ int mlx5_destroy_qp(struct ibv_qp *ibqp)
 	if (!ctx->cqe_version)
 		pthread_mutex_lock(&ctx->qp_table_mutex);
 
+	if (qp->devx_qp) {
+	ret = mlx5dv_devx_obj_destroy(qp->devx_qp->devx_obj);
+	if (ret) {
+		mlx5_err(ctx->dbg_fp, "%s:%04d: failed destroy devx qp object\n", __func__, __LINE__);
+	} else {
+		mlx5_dbg(ctx->dbg_fp, MLX5_DBG_QP, "success destroy qp:0x%06x\n", ibqp->qp_num);
+
+		ret = mlx5dv_devx_umem_dereg(qp->devx_qp->wq_umem);
+		if (ret) {
+			mlx5_err(ctx->dbg_fp, "%s:%04d: failed dereg wq umem for qp:0x%06x\n", __func__, __LINE__, ibqp->qp_num);
+		} else {
+			mlx5_dbg(ctx->dbg_fp, MLX5_DBG_QP, "success dereg wq umem for qp:0x%06x\n", ibqp->qp_num);
+			qp->devx_qp->wq_umem = NULL;
+		}
+		//TODO: check all events has been completed as being done in ibv_cmd_destroy_qp
+	}
+	} else {
 	ret = ibv_cmd_destroy_qp(ibqp);
+	}
 	if (ret) {
 		if (!ctx->cqe_version)
 			pthread_mutex_unlock(&ctx->qp_table_mutex);
@@ -3000,7 +3018,17 @@ int mlx5_destroy_qp(struct ibv_qp *ibqp)
 		mlx5_clear_uidx(ctx, qp->rsc.rsn);
 
 	if (qp->dc_type != MLX5DV_DCTYPE_DCT) {
+		if (qp->devx_qp != NULL) {
+			if (mlx5dv_devx_umem_dereg(qp->devx_qp->dbr_umem) != 0) {
+			mlx5_err(ctx->dbg_fp, "%s:%04d: failed dereg db umem for qp:0x%06x\n",
+				__func__, __LINE__, ibqp->qp_num); //failed here
+			} else {
+				mlx5_dbg(ctx->dbg_fp, MLX5_DBG_QP, "success dereg db umem for qp:0x%06x\n", ibqp->qp_num);
+			}
+			free(qp->db);
+		} else {
 		mlx5_free_db(ctx, qp->db, ibqp->pd, qp->custom_db);
+		}
 		mlx5_free_qp_buf(ctx, qp);
 	}
 free:
@@ -3008,6 +3036,11 @@ free:
 		atomic_fetch_sub(&mparent_domain->mpd.refcount, 1);
 
 	mlx5_put_qp_uar(ctx, qp->bf);
+
+	if (qp->devx_qp) {
+		free(qp->devx_qp);
+		qp->devx_qp = NULL;
+	}
 	free(qp);
 
 	return 0;
